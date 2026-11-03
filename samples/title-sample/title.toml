@@ -1,0 +1,49 @@
+title = "title-sample First-Level"
+entry = "entry"
+abi_version = "0.1.0"
+
+[stubs]
+svc_log = "log"
+svc_sleep = "noop"
+"sm:" = "log"
+"sm:m" = "log"
+"fs" = "log"
+"fs:ldr" = "log"
+"fs:pr" = "log"
+"hid" = "log"
+"irs" = "log"
+"audout" = "log"
+"audren" = "log"
+"appletOE" = "log"
+"acc:u0" = "log"
+"ns:am2" = "log"
+"nifm:u" = "noop"
+
+[runtime]
+performance_mode = "docked"
+
+[assets]
+romfs_path = "/path/to/title-sample/romfs"
+shader_cache_path = "/path/to/title-sample/shader-cache"
+save_data_dir = "/path/to/title-sample/save-data"
+
+[keys]
+prod_keys_path = "/path/to/prod.keys"
+title_keys_path = "/path/to/title.keys"
+
+[inputs]
+xci_path = "/path/to/title.xci"
+program_nca_path = "/path/to/title-sample/program.nca"
+exefs_dir = "/path/to/title-sample/exefs"
+
+[patches]
+patch_set = "patches/patches.toml"
+
+[validation]
+reference_video_path = "/path/to/title-sample/gameplay-video/fedcba9876543210-001.mp4"
+segment_start = "00:00:00"
+segment_end = "00:06:00"
+
+[gpu]
+backend = "metal"
+notes = "Placeholder for Maxwell-to-Metal mapping during first-level validation."

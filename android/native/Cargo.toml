@@ -1,0 +1,22 @@
+[package]
+name = "recomp-android-bootstrap"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SDL3 Android activity bootstrap that loads the recompiled game library"
+
+[lib]
+name = "main"
+crate-type = ["cdylib"]
+
+# Keep this crate out of the repository's host workspace: it is built only for
+# aarch64-linux-android and needs the SDL3 build-from-source path.
+[workspace]
+
+[profile.release]
+# The SDL3 window and the guest runtime both use threads; unwinding across the
+# SDL_main boundary is not desirable.
+panic = "abort"
+
+[target.'cfg(target_os = "android")'.dependencies]
+sdl3 = { version = "0.20", default-features = false, features = ["build-from-source"] }

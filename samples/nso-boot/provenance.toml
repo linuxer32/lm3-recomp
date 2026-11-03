@@ -1,0 +1,30 @@
+schema_version = "1"
+
+[title]
+name = "nso-boot sample"
+title_id = "0100000000000000"
+version = "0.0.0"
+region = "US"
+
+[collection]
+device = "synthetic"
+collected_at = "2026-10-27"
+notes = "Generated inputs; no proprietary content."
+
+[collection.tool]
+name = "generate.py"
+version = "current"
+
+[[inputs]]
+path = "samples/nso-boot/inputs/homebrew.nro"
+format = "nro0"
+sha256 = "1e476249b94c3be2b3e667ff5857fba59f0eccb310bb6fb632087063a2fdbd56"
+size = 174
+role = "placeholder_module"
+
+[[inputs]]
+path = "samples/nso-boot/inputs/boot.nso"
+format = "nso0"
+sha256 = "9ba2052d4421485dd4de28e3cbeaeea7c0608d1868c1b7c7292eb8dbb1183103"
+size = 12113
+role = "boot_executable"

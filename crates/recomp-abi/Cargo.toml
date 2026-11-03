@@ -1,0 +1,17 @@
+[package]
+name = "recomp-abi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+# No runtime dependencies: generated code depends on this crate, so anything
+# it pulls in would recompile every chunk when it changes.
+
+[dev-dependencies]
+# Differential tests compare the inline fast paths with the evaluator's
+# Arm-semantics `exec`. Test-only: generated chunks still depend only on
+# this crate.
+recomp-simd = { path = "../recomp-simd" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(recomp_fast_tls)"] }

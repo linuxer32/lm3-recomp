@@ -1,0 +1,23 @@
+[package]
+name = "recomp-gfx-vulkan"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ash = "0.38"
+astc-decode = "0.3"
+egui = "0.36"
+egui-ash-renderer = "0.13"
+foldhash = "0.2"
+libc = "0.2"
+recomp-gfx = { path = "../recomp-gfx" }
+recomp-services = { path = "../recomp-services" }
+sdl3 = { version = "0.20", features = ["ash"] }
+texture2ddecoder = "0.1"
+twox-hash = { version = "2.1", default-features = false, features = ["std", "xxhash3_64"] }
+
+# Android has no system SDL3 package in the NDK. Build the pinned SDL3 source
+# with the NDK toolchain; desktop keeps using the system/pkg-config library.
+[target.'cfg(target_os = "android")'.dependencies]
+sdl3 = { version = "0.20", features = ["ash", "build-from-source"] }

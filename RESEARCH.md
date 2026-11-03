@@ -1,0 +1,128 @@
+# Research Directions and Required Research
+
+This document lists research topics needed to complete the specs and deliver a working static recompilation pipeline.
+
+## Core Research Directions
+
+### 1) Binary Formats and Loading
+- Identify Switch executable formats used by retail titles.
+- Map sections, relocations, and symbol handling.
+- Determine how overlays or dynamic code segments are represented.
+
+Needed research:
+- Public documentation or reverse engineering notes on Switch executable formats.
+- Tools and libraries that can parse these formats reliably.
+
+### 2) CPU ISA and Semantics
+- Confirm the exact ARMv8-A subset used by Switch titles.
+- Enumerate required SIMD and floating point instructions.
+- Define precise flag and exception semantics for those instructions.
+
+Needed research:
+- ARMv8-A reference manuals.
+- Instruction usage analysis on sample titles.
+
+### 3) OS, Services, and IPC
+- Identify essential system services required for boot and main loop.
+- Define a minimal service surface for early milestones.
+- Determine which services can be stubbed without breaking games.
+
+Needed research:
+- Public technical references on Switch OS services.
+- Trace-based profiling of service calls for selected titles.
+
+### 4) GPU and Graphics
+- Confirm GPU architecture and the command stream interface used by games.
+- Assess feasibility of command stream interpretation vs shader translation.
+- Identify core texture formats and shader features.
+
+Needed research:
+- GPU architecture references.
+- Shader translation tooling that can be adapted.
+
+### 5) Timing and Determinism
+- Determine which timing-sensitive behaviors must be modeled.
+- Identify stable methods for trace collection and replay.
+
+Needed research:
+- Prior work on deterministic replay in emulation or recompilation.
+- Instrumentation approaches for low overhead tracing.
+
+### 6) Audio, Input, and I/O
+- Identify the minimal audio path needed for gameplay.
+- Map controller input handling to the runtime.
+- Define file system access boundaries and safety rules.
+
+Needed research:
+- Audio subsystem assumptions in Switch titles.
+- Input service behavior and common usage patterns.
+
+### 7) Legal and Preservation Policy
+- Define acceptable inputs, distributions, and legal compliance expectations.
+- Ensure documentation is consistent with preservation goals.
+- Follow and update `docs/LEGAL-POLICY.md` as policy decisions are finalized.
+
+Needed research:
+- Jurisdiction-specific rules affecting preservation.
+- Best practices for open source preservation tooling.
+
+### 8) Automation, Input Replay, and Media Normalization
+- Define a stable automation loop for intake, build, capture, and validation.
+- Normalize reference media and capture outputs into comparable artifacts.
+- Model deterministic input replay aligned to reference timelines.
+
+Needed research:
+- Capture tooling behavior and determinism guarantees.
+- Input timing and latency characteristics for Switch titles.
+- Video/audio similarity metrics and drift analysis.
+- Operational checklist for title-sample validation artifacts (see `docs/title-sample-validation-prereqs.md`).
+
+### 9) LLM-Assisted Decompilation Long-Tail Strategy
+- Define when similarity-guided scheduling beats difficulty-only scheduling for unresolved functions.
+- Identify specialist lanes where domain tools materially improve output quality (graphics macros, math transforms, mechanical cleanup).
+- Determine guardrails needed to keep unattended agent loops policy-compliant and reproducible.
+
+Needed research:
+- Compare opcode-sequence distance tools (for example Coddog-style bounded Levenshtein) against embedding-based retrieval for candidate ranking.
+- Measure whether cleanup/documentation passes improve downstream success on similar unresolved functions.
+- Track attempt distributions and outlier classes (for example large functions, graphics-heavy functions, matrix/vector math).
+- Define retry budgets and escalation rules that reduce token burn without masking hard blockers.
+
+## Seed Resources (Reviewed)
+- Jamulator write-up on static recompilation pitfalls and concurrency: https://andrewkelley.me/post/jamulator.html
+- N64Recomp repository for pipeline patterns: https://github.com/N64Recomp/N64Recomp
+- Dinosaur Planet recomp for asset separation precedent: https://github.com/DinosaurPlanetRecomp/dino-recomp
+- Nintendo Switch platform baseline: https://en.wikipedia.org/wiki/Nintendo_Switch
+- Tegra X1 whitepaper: https://www.nvidia.com/content/tegra/embedded-systems/pdf/tegra-x1-whitepaper.pdf
+- Switch hardware overview: https://switchbrew.org/wiki/Hardware
+- Ryujinx (MIT license): Maxwell 3D register layout (`ThreedClassState`), macro execution engine semantics, GPFIFO command encoding, and shader program decoders; used as a reference for `recomp-gfx::maxwell`. https://github.com/Ryujinx/Ryujinx
+- Switch homebrew NRO format: https://switchbrew.org/wiki/NRO
+- Switch NSO format and compression: https://switchbrew.org/wiki/NSO
+- Homebrew ABI entrypoint and loader config: https://switchbrew.org/wiki/Homebrew_ABI
+- NACP title metadata format: https://switchbrew.org/wiki/NACP
+- Switch NCA container format: https://switchbrew.org/wiki/NCA
+- hactool (XCI/NCA extraction and keyset handling): https://github.com/SciresM/hactool
+- hactoolnet (XCI/NCA extraction with user keys): https://github.com/Thealexbarney/hactoolnet
+- nstool (XCI/NCA/NSO extraction): https://github.com/jakcron/nstool
+- Switch HID input services: https://switchbrew.org/wiki/HID
+- FFmpeg documentation (capture, formats, filters): https://ffmpeg.org/ffmpeg.html
+- FFmpeg filters (SSIM/PSNR references): https://ffmpeg.org/ffmpeg-filters.html
+- Ghidra SLEIGH language reference (p-code semantics): https://github.com/NationalSecurityAgency/ghidra/blob/master/GhidraDocs/languages/html/sleigh.html
+- sleigh library (p-code lifting implementation): https://github.com/lifting-bits/sleigh
+- Resurrecting Crimsonland (banteg, 2026-02-01): headless Ghidra pipeline with evidence-backed rename map and regen loop, plus runtime instrumentation (WinDbg/cdb, Frida) for behavior capture; useful automation and validation ideas. https://banteg.xyz/posts/crimsonland/
+- The Long Tail of LLM-Assisted Decompilation (Chris Lewis, 2026-02-16): reports that similarity-guided candidate scheduling, specialist skills, cleanup loops, and strict hooks materially improved decomp throughput before hard tail limits (large functions, graphics macros, math transforms) dominated. https://blog.chrislewis.au/the-long-tail-of-llm-assisted-decompilation/
+- FFmpeg filter reference for SSIM/PSNR/EBU R128 audio analysis: https://manpages.debian.org/bookworm/ffmpeg/ffmpeg-filters.1.en.html
+- FFmpeg libvmaf filter usage notes: https://manpages.opensuse.org/Tumbleweed/ffmpeg/ffmpeg-filters.1.en.html
+- EBU R 128 loudness recommendation (audio loudness measurement): https://tech.ebu.ch/publications/r128
+
+## Research Deliverables
+- A research summary for each category with sources.
+- A list of confirmed requirements to update the specs.
+- A compatibility matrix based on real title traces.
+
+## Open Research Questions
+- What is the minimal instruction coverage needed for a first title?
+- Which OS services are required to reach a game loop without patches?
+- What is the simplest graphics path that still produces correct output?
+- How can we generate reference traces without distributing proprietary content?
+- What is the minimal input script fidelity needed for stable validation?

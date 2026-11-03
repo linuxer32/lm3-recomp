@@ -1,0 +1,11 @@
+# Build products (native .so files are copied here; never commit them)
+app/src/main/jniLibs/
+app/src/main/java/org/libsdl/app/
+build/
+.gradle/
+local.properties
+.debug.keystore
+
+# Native Cargo output
+native/target/
+stub-game/target/

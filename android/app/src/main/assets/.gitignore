@@ -1,0 +1,6 @@
+# APK assets live here only while experimenting locally. Build scripts stage
+# user-supplied assets from outside the repository instead; never commit game
+# data, keys, or proprietary binaries.
+*
+!.gitignore
+!.gitkeep

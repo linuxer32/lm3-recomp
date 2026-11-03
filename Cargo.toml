@@ -1,0 +1,21 @@
+[workspace]
+exclude = ["out", "artifacts"]
+members = [
+  "crates/recomp-abi",
+  "crates/recomp-cli",
+  "crates/recomp-gfx",
+  "crates/recomp-gfx-vulkan",
+  "crates/recomp-isa",
+  "crates/recomp-pipeline",
+  "crates/recomp-runtime",
+  "crates/recomp-services",
+  "crates/recomp-simd",
+  "crates/recomp-timing",
+  "crates/recomp-validation",
+  "tools/shader-precompile",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"

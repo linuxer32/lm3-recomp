@@ -1,0 +1,18 @@
+title = "nso-boot sample"
+entry = "entry"
+abi_version = "0.1.0"
+
+[runtime]
+performance_mode = "handheld"
+
+[runtime.ipc]
+romfs_base = 0x4800
+romfs_size = 0x101
+
+[runtime.memory_layout]
+regions = [
+  { name = "text", base = 0x0, size = 0x1000, permissions = { read = true, write = false, execute = true } },
+  { name = "rodata", base = 0x1000, size = 0x1000, permissions = { read = true, write = false, execute = false } },
+  { name = "data", base = 0x2000, size = 0x4000, permissions = { read = true, write = true, execute = false } },
+  { name = "heap", base = 0x10000, size = 0x4000, permissions = { read = true, write = true, execute = false } },
+]
