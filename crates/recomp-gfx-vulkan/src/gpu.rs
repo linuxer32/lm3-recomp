@@ -4753,7 +4753,8 @@ impl Gpu {
                 return TextureState::Unsupported;
             };
         let (width, mut height) = (header.width(), header.height());
-        if kind == TextureKind::D1 {
+        if kind == TextureKind::D1 || matches!(header.target(), Some(Target::D1 | Target::D1Array))
+        {
             // A 1D image has one row, whatever the header's height says.
             height = 1;
         }
@@ -4778,6 +4779,10 @@ impl Gpu {
                 Some(Target::D1Array) => (vk::ImageViewType::TYPE_1D_ARRAY, header.array_layers()),
                 _ => (vk::ImageViewType::TYPE_1D, 1),
             }
+        } else if matches!(header.target(), Some(Target::D1)) {
+            (vk::ImageViewType::TYPE_2D, 1)
+        } else if matches!(header.target(), Some(Target::D1Array)) {
+            (vk::ImageViewType::TYPE_2D_ARRAY, header.array_layers())
         } else if cube_from_2d {
             (vk::ImageViewType::CUBE, 6)
         } else {
