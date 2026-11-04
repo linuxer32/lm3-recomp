@@ -144,10 +144,14 @@ Vulkan import library is linked. See `docs/windows-build.md`.
   array and cube textures is prepared (block-linear levels follow each other,
   each in blocks fitted to its height; 3D and pitch-linear textures keep level
   0), and a view shows the levels its header names: with level 0 alone, LM3's
-  carpets and floors sparkled as they moved. Prepared textures upload as the
-  next submission begins, up to 32 MB per submission. A draw that samples a
-  texture still being prepared waits for it and uploads it at once, up to
-  12 ms per submission in all, and samples a transparent placeholder after
+  carpets and floors sparkled as they moved. Some effects are sampled with a
+  cube instruction but bound as a plain 2D image (a 32x32 matcap in LM3's
+  ghost and gem shaders); the image is uploaded as a cube with the single
+  face repeated, rather than sampling the magenta placeholder. Prepared
+  textures upload as the next submission begins, up to 32 MB per submission.
+  A draw that samples a texture still being prepared waits for it and uploads
+  it at once, up to 12 ms per submission in all, and samples a transparent
+  placeholder after
   that: new things (the room behind a door, debris in LM3's King Boo chase)
   flickered in over 1 to 37 frames while each new texture waited for the next
   submission. In the chase the frames drawing placeholders went from 180 to

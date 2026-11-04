@@ -196,22 +196,33 @@ pub fn texture_format(format: u32, srgb: bool) -> Option<TexelLayout> {
     let kind = (format >> 7) & 7;
     let pick = |unorm: vk::Format, srgb_format: vk::Format| if srgb { srgb_format } else { unorm };
     Some(match (code, kind) {
+        (0x01, 3) => plain(vk::Format::R32G32B32A32_SINT, 16),
         (0x01, 7) => plain(vk::Format::R32G32B32A32_SFLOAT, 16),
         (0x01, 4) => plain(vk::Format::R32G32B32A32_UINT, 16),
         (0x03, 7) => plain(vk::Format::R16G16B16A16_SFLOAT, 8),
+        (0x03, 1) => plain(vk::Format::R16G16B16A16_SNORM, 8),
         (0x03, 2) => plain(vk::Format::R16G16B16A16_UNORM, 8),
+        (0x03, 3) => plain(vk::Format::R16G16B16A16_SINT, 8),
+        (0x03, 4) => plain(vk::Format::R16G16B16A16_UINT, 8),
         (0x04, 7) => plain(vk::Format::R32G32_SFLOAT, 8),
+        (0x04, 3) => plain(vk::Format::R32G32_SINT, 8),
         (0x04, 4) => plain(vk::Format::R32G32_UINT, 8),
         (0x07 | 0x08, 2) => plain(
             pick(vk::Format::R8G8B8A8_UNORM, vk::Format::R8G8B8A8_SRGB),
             4,
         ),
         (0x07 | 0x08, 1) => plain(vk::Format::R8G8B8A8_SNORM, 4),
+        (0x07 | 0x08, 3) => plain(vk::Format::R8G8B8A8_SINT, 4),
         (0x07 | 0x08, 4) => plain(vk::Format::R8G8B8A8_UINT, 4),
         (0x09, 2) => plain(vk::Format::A2B10G10R10_UNORM_PACK32, 4),
+        (0x09, 4) => plain(vk::Format::A2B10G10R10_UINT_PACK32, 4),
         (0x0C, 7) => plain(vk::Format::R16G16_SFLOAT, 4),
+        (0x0C, 1) => plain(vk::Format::R16G16_SNORM, 4),
         (0x0C, 2) => plain(vk::Format::R16G16_UNORM, 4),
+        (0x0C, 3) => plain(vk::Format::R16G16_SINT, 4),
+        (0x0C, 4) => plain(vk::Format::R16G16_UINT, 4),
         (0x0F, 7) => plain(vk::Format::R32_SFLOAT, 4),
+        (0x0F, 3) => plain(vk::Format::R32_SINT, 4),
         (0x0F, 4) => plain(vk::Format::R32_UINT, 4),
         (0x10, _) => compressed(vk::Format::BC6H_SFLOAT_BLOCK, 16),
         (0x11, _) => compressed(vk::Format::BC6H_UFLOAT_BLOCK, 16),
@@ -221,10 +232,17 @@ pub fn texture_format(format: u32, srgb: bool) -> Option<TexelLayout> {
         ),
         (0x18, 2) => plain(vk::Format::R8G8_UNORM, 2),
         (0x18, 1) => plain(vk::Format::R8G8_SNORM, 2),
+        (0x18, 3) => plain(vk::Format::R8G8_SINT, 2),
+        (0x18, 4) => plain(vk::Format::R8G8_UINT, 2),
         (0x1B, 7) => plain(vk::Format::R16_SFLOAT, 2),
+        (0x1B, 1) => plain(vk::Format::R16_SNORM, 2),
         (0x1B, 2) => plain(vk::Format::R16_UNORM, 2),
+        (0x1B, 3) => plain(vk::Format::R16_SINT, 2),
+        (0x1B, 4) => plain(vk::Format::R16_UINT, 2),
         (0x1D, 2) => plain(vk::Format::R8_UNORM, 1),
         (0x1D, 1) => plain(vk::Format::R8_SNORM, 1),
+        (0x1D, 3) => plain(vk::Format::R8_SINT, 1),
+        (0x1D, 4) => plain(vk::Format::R8_UINT, 1),
         (0x20, _) => plain(vk::Format::E5B9G9R9_UFLOAT_PACK32, 4),
         (0x21, _) => plain(vk::Format::B10G11R11_UFLOAT_PACK32, 4),
         (0x24, _) => compressed(
@@ -518,6 +536,18 @@ mod tests {
         let bc7 = texture_format(0x17, true).expect("bc7");
         assert_eq!(bc7.format, vk::Format::BC7_SRGB_BLOCK);
         assert_eq!(texture_format(0x40, false), None, "ASTC is not decoded yet");
+    }
+
+    #[test]
+    fn texture_formats_cover_all_component_types() {
+        let snorm16 = texture_format(0x03 | (1 << 7), false).expect("rgba16 snorm");
+        assert_eq!(snorm16.format, vk::Format::R16G16B16A16_SNORM);
+        let sint8 = texture_format(0x07 | (3 << 7), false).expect("rgba8 sint");
+        assert_eq!(sint8.format, vk::Format::R8G8B8A8_SINT);
+        let uint16 = texture_format(0x1B | (4 << 7), false).expect("r16 uint");
+        assert_eq!(uint16.format, vk::Format::R16_UINT);
+        let snorm8 = texture_format(0x1D | (1 << 7), false).expect("r8 snorm");
+        assert_eq!(snorm8.format, vk::Format::R8_SNORM);
     }
 
     #[test]

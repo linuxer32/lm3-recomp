@@ -4613,7 +4613,10 @@ impl Gpu {
             (kind, header.target()),
             (TextureKind::D2, Some(Target::D2 | Target::D2NoMipmap))
                 | (TextureKind::D2Array, Some(Target::D2Array))
-                | (TextureKind::Cube, Some(Target::Cube))
+                | (
+                    TextureKind::Cube,
+                    Some(Target::Cube | Target::D2 | Target::D2NoMipmap | Target::D2Array)
+                )
                 | (
                     TextureKind::D3,
                     Some(Target::D2 | Target::D2NoMipmap | Target::D3)
@@ -4746,12 +4749,24 @@ impl Gpu {
                 return TextureState::Unsupported;
             };
         let (width, height) = (header.width(), header.height());
+        // Some effects are sampled with a cube instruction but bound as a
+        // plain 2D image (a 32x32 matcap in LM3's ghost and gem shaders).
+        // Vulkan needs six faces for a cube view, so repeat the single face
+        // when the header has no array to take them from.
+        let cube_from_2d = kind == TextureKind::Cube
+            && matches!(
+                header.target(),
+                Some(Target::D2 | Target::D2NoMipmap | Target::D2Array)
+            );
+        let source_layers = header.array_layers().max(1);
         // LM3 samples a 2D texture with a 3D instruction on its save screen;
         // upload it as one slice of a 3D image, so the sample reads z = 0.
         let one_slice = kind == TextureKind::D3
             && matches!(header.target(), Some(Target::D2 | Target::D2NoMipmap));
         let (view_type, layers) = if one_slice {
             (vk::ImageViewType::TYPE_3D, 1)
+        } else if cube_from_2d {
+            (vk::ImageViewType::CUBE, 6)
         } else {
             match header.target() {
                 Some(Target::D2Array) => (vk::ImageViewType::TYPE_2D_ARRAY, header.array_layers()),
@@ -4825,7 +4840,9 @@ impl Gpu {
                         .collect();
                     level_size = end;
                 }
-                layer_stride = if layers > 1 {
+                layer_stride = if cube_from_2d && source_layers < 6 {
+                    0
+                } else if layers > 1 {
                     texture::layer_stride(
                         header.levels(),
                         u64::from(gobs_in_y),
