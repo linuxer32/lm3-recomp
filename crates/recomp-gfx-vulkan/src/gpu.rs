@@ -2575,10 +2575,14 @@ impl Gpu {
     ) -> Result<Image, String> {
         let (image_type, depth, array_layers) = match view_type {
             vk::ImageViewType::TYPE_1D => (vk::ImageType::TYPE_1D, 1, 1),
+            vk::ImageViewType::TYPE_1D_ARRAY => (vk::ImageType::TYPE_1D, 1, layers),
             vk::ImageViewType::TYPE_3D => (vk::ImageType::TYPE_3D, layers, 1),
             _ => (vk::ImageType::TYPE_2D, 1, layers),
         };
-        let mut flags = if view_type == vk::ImageViewType::CUBE {
+        let mut flags = if matches!(
+            view_type,
+            vk::ImageViewType::CUBE | vk::ImageViewType::CUBE_ARRAY
+        ) {
             vk::ImageCreateFlags::CUBE_COMPATIBLE
         } else {
             vk::ImageCreateFlags::empty()
@@ -4765,12 +4769,18 @@ impl Gpu {
             && matches!(header.target(), Some(Target::D2 | Target::D2NoMipmap));
         let (view_type, layers) = if one_slice {
             (vk::ImageViewType::TYPE_3D, 1)
+        } else if kind == TextureKind::D1 {
+            match header.target() {
+                Some(Target::D1Array) => (vk::ImageViewType::TYPE_1D_ARRAY, header.array_layers()),
+                _ => (vk::ImageViewType::TYPE_1D, 1),
+            }
         } else if cube_from_2d {
             (vk::ImageViewType::CUBE, 6)
         } else {
             match header.target() {
                 Some(Target::D2Array) => (vk::ImageViewType::TYPE_2D_ARRAY, header.array_layers()),
                 Some(Target::Cube) => (vk::ImageViewType::CUBE, 6),
+                Some(Target::CubeArray) => (vk::ImageViewType::CUBE_ARRAY, header.array_layers()),
                 Some(Target::D3) => (vk::ImageViewType::TYPE_3D, 1),
                 _ => (vk::ImageViewType::TYPE_2D, 1),
             }
@@ -5172,8 +5182,27 @@ impl Gpu {
                 | (u64::from(draw.depth_write_enable) << 1)
                 | (u64::from(draw.depth_test_func) << 8),
         ]);
-        let cull = cull_mode(draw.cull_enable, draw.cull_face);
-        let front = front_face(draw.front_face, draw.y_control);
+        let mut cull = cull_mode(draw.cull_enable, draw.cull_face);
+        let mut front = front_face(draw.front_face, draw.y_control);
+        // Diagnostics for a title with an inverted face order or a culled
+        // floor: `RECOMP_VULKAN_CULL=off|invert-front|swap-face`.
+        match std::env::var("RECOMP_VULKAN_CULL").as_deref() {
+            Ok("off") => cull = vk::CullModeFlags::NONE,
+            Ok("invert-front") => {
+                front = match front {
+                    vk::FrontFace::CLOCKWISE => vk::FrontFace::COUNTER_CLOCKWISE,
+                    _ => vk::FrontFace::CLOCKWISE,
+                }
+            }
+            Ok("swap-face") => {
+                cull = match cull {
+                    vk::CullModeFlags::FRONT => vk::CullModeFlags::BACK,
+                    vk::CullModeFlags::BACK => vk::CullModeFlags::FRONT,
+                    other => other,
+                }
+            }
+            _ => {}
+        }
         key.push(
             u64::from(cull.as_raw())
                 | (u64::from(front.as_raw() as u32) << 8)
@@ -5330,8 +5359,8 @@ impl Gpu {
             // and that path is only taken without VK_EXT_depth_clip_control.
             .depth_clamp_enable(self.depth_clamp && draw.depth_mode == 0)
             .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(cull_mode(draw.cull_enable, draw.cull_face))
-            .front_face(front_face(draw.front_face, draw.y_control))
+            .cull_mode(cull)
+            .front_face(front)
             .line_width(1.0);
         // Polygon offset keeps coplanar details (a crown on a head, decals
         // and shadows on a floor) from z-fighting. Vulkan's constant factor

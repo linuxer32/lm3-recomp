@@ -140,8 +140,8 @@ Vulkan import library is linked. See `docs/windows-build.md`.
   (TSC). A header whose address is a render target samples that image. Others
   are read from guest memory and handed to `decode.rs` worker threads, which
   untile them (block linear, 64x8-byte GOBs) and decode ASTC to RGBA8 with the
-  `astc-decode` crate (the host GPU has no ASTC). Every mip level of 2D,
-  array and cube textures is prepared (block-linear levels follow each other,
+  `astc-decode` crate (the host GPU has no ASTC). Every mip level of 1D, 2D,
+  array, cube and cube-array textures is prepared (block-linear levels follow each other,
   each in blocks fitted to its height; 3D and pitch-linear textures keep level
   0), and a view shows the levels its header names: with level 0 alone, LM3's
   carpets and floors sparkled as they moved. Some effects are sampled with a
@@ -439,6 +439,8 @@ report, so every query reads as visible.
 - `RECOMP_VULKAN_SKIP_FS=<address>,...` skips draws with those fragment
   programs: dropping groups of draws and comparing captures finds the draw
   behind a glitch.
+- `RECOMP_VULKAN_CULL=off`, `invert-front` or `swap-face` overrides face
+  culling for a title whose winding or cull state looks inverted.
 - Unsupported formats, topologies and shader failures are reported once each
   with a `[recomp-vulkan]` line; the present line counts drawn and skipped
   draws.
