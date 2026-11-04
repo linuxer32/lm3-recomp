@@ -555,6 +555,14 @@ mod tests {
     }
 
     #[test]
+    fn patches_fall_back_to_triangles() {
+        assert_eq!(
+            topology(recomp_gfx::maxwell::render::PrimitiveTopology::Patches),
+            Some(vk::PrimitiveTopology::TRIANGLE_LIST)
+        );
+    }
+
+    #[test]
     fn vertex_formats_follow_size_and_type() {
         assert_eq!(
             vertex_format(0x01, 7),
