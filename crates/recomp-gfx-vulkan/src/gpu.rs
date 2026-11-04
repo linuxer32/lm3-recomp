@@ -4752,7 +4752,11 @@ impl Gpu {
                 ));
                 return TextureState::Unsupported;
             };
-        let (width, height) = (header.width(), header.height());
+        let (width, mut height) = (header.width(), header.height());
+        if kind == TextureKind::D1 {
+            // A 1D image has one row, whatever the header's height says.
+            height = 1;
+        }
         // Some effects are sampled with a cube instruction but bound as a
         // plain 2D image (a 32x32 matcap in LM3's ghost and gem shaders).
         // Vulkan needs six faces for a cube view, so repeat the single face
