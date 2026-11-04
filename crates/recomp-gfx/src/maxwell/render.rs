@@ -264,7 +264,8 @@ pub struct DrawCall {
     /// Polygon offset (depth bias) for filled triangles, when enabled:
     /// slope factor, constant units and clamp.
     pub depth_bias: Option<(f32, f32, f32)>,
-    /// `Y_CONTROL`: bit 4 flips y, and so the front face's winding.
+    /// `Y_CONTROL`: bit 0 negates the viewport's y (flipped passes such as
+    /// reflections), bit 4 flips the front face's winding.
     pub y_control: u32,
     /// `VIEW_VOLUME_CLIP_CONTROL`: whether depth is clipped or clamped.
     pub view_volume_clip_control: u32,

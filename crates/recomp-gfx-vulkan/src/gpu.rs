@@ -6372,7 +6372,13 @@ fn front_face(front_face: u32, y_control: u32) -> vk::FrontFace {
 /// negative y scale does).
 pub fn viewport(draw: &DrawCall, width: u32, height: u32) -> vk::Viewport {
     let transform = draw.viewport;
-    let [sx, sy, sz] = transform.scale;
+    let [sx, mut sy, sz] = transform.scale;
+    // Y_CONTROL bit 0 negates y in the guest's viewport transform (flipped
+    // passes: reflections and shadow variants). A negative Vulkan viewport
+    // height reproduces it.
+    if draw.y_control & 1 != 0 {
+        sy = -sy;
+    }
     let [tx, ty, tz] = transform.translate;
     let (near, far) = if draw.depth_mode == 0 {
         (tz - sz, tz + sz)

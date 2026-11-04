@@ -274,7 +274,9 @@ Draws cull the faces the guest culls (`CULL_FACE`, when culling is on) with
 its front face (`FRONT_FACE`): OpenGL's winding is defined for a window whose
 y goes up, and the guest, rendering with y going down as Vulkan does, sets
 `Y_CONTROL`'s flip bit to turn it back, so its winding is Vulkan's with the
-flip and the other one without. The front face also picks the two-sided
+flip and the other one without. Its bit 0 negates the viewport's y for flipped
+passes (reflections and shadow variants), reproduced as a negative Vulkan
+viewport height. The front face also picks the two-sided
 stencil test's face. Every draw once drew both faces: LM3's lights draw
 their volume with front faces culled when the camera is inside it, and lamps
 then lit no floor (or lit it while switched off), boxes of floor flickered as
