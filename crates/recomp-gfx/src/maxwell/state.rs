@@ -354,6 +354,11 @@ impl MaxwellState {
         self.read(m::Y_CONTROL)
     }
 
+    /// Vertices in each tessellation patch (3, 4, ...).
+    pub fn patch_vertices(&self) -> u32 {
+        self.read(m::PATCH_VERTICES) & 0xFF
+    }
+
     /// The polygon offset (depth bias) for filled triangles, when enabled:
     /// the slope factor, the constant units and the clamp.
     pub fn depth_bias(&self) -> Option<(f32, f32, f32)> {

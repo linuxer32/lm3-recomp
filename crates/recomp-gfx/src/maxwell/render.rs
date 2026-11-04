@@ -286,6 +286,8 @@ pub struct DrawCall {
     pub color_masks: [u32; 8],
     pub vertex_buffer_limits: [u64; 16],
     pub depth_mode: u32,
+    /// Vertices in each tessellation patch (0 unless the draw is Patches).
+    pub patch_vertices: u32,
     /// The clip distances (bit per distance) that clip primitives.
     pub clip_distances: u8,
     pub depth_target_enable: bool,
@@ -385,6 +387,7 @@ impl DrawCall {
             color_masks: std::array::from_fn(|index| state.color_mask(index)),
             vertex_buffer_limits: std::array::from_fn(|index| state.vertex_buffer_limit(index)),
             depth_mode: state.depth_mode(),
+            patch_vertices: state.patch_vertices(),
             clip_distances: state.user_clip_enable(),
             depth_target_enable: state.depth_target_enable(),
             depth_target_size: state.depth_target_size(),

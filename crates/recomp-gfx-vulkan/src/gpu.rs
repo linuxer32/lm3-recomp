@@ -3284,7 +3284,8 @@ impl Gpu {
         data.clear();
         triangles.clear();
         let parameters = draw.parameters;
-        let quads = parameters.topology == PrimitiveTopology::Quads;
+        let quads = parameters.topology == PrimitiveTopology::Quads
+            || (parameters.topology == PrimitiveTopology::Patches && draw.patch_vertices == 4);
         let restart = restart_index(draw);
         let guest_restart = draw.primitive_restart;
         let key: Option<IndexKey>;
