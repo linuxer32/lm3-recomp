@@ -261,6 +261,9 @@ pub struct DrawCall {
     pub cull_enable: bool,
     pub front_face: u32,
     pub cull_face: u32,
+    /// Polygon offset (depth bias) for filled triangles, when enabled:
+    /// slope factor, constant units and clamp.
+    pub depth_bias: Option<(f32, f32, f32)>,
     /// `Y_CONTROL`: bit 4 flips y, and so the front face's winding.
     pub y_control: u32,
     /// `VIEW_VOLUME_CLIP_CONTROL`: whether depth is clipped or clamped.
@@ -367,6 +370,7 @@ impl DrawCall {
             cull_enable: state.cull_enable(),
             front_face: state.front_face(),
             cull_face: state.cull_face(),
+            depth_bias: state.depth_bias(),
             y_control: state.y_control(),
             view_volume_clip_control: state.view_volume_clip_control(),
             primitive_restart: state.primitive_restart(),

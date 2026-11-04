@@ -73,8 +73,8 @@ impl ShaderPack {
             read_exact_at(&file, &mut table, HEADER_BYTES)
                 .map_err(|error| format!("{}: {error}", path.display()))?;
             let mut offsets = Vec::with_capacity(count);
-            for chunk in table.chunks_exact(8) {
-                offsets.push(u64::from_le_bytes(chunk.try_into().unwrap()));
+            for chunk in table.as_chunks::<8>().0 {
+                offsets.push(u64::from_le_bytes(*chunk));
             }
             for (index, &offset) in offsets.iter().enumerate() {
                 let end = offsets.get(index + 1).copied().unwrap_or(len);

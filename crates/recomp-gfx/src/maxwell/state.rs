@@ -354,6 +354,18 @@ impl MaxwellState {
         self.read(m::Y_CONTROL)
     }
 
+    /// The polygon offset (depth bias) for filled triangles, when enabled:
+    /// the slope factor, the constant units and the clamp.
+    pub fn depth_bias(&self) -> Option<(f32, f32, f32)> {
+        (self.read(m::DEPTH_BIAS_STATE + 8) & 1 != 0).then(|| {
+            (
+                self.read_f32(m::DEPTH_BIAS_FACTOR),
+                self.read_f32(m::DEPTH_BIAS_UNITS),
+                self.read_f32(m::DEPTH_BIAS_CLAMP),
+            )
+        })
+    }
+
     /// The index that restarts a strip or fan (`PRIMITIVE_RESTART_STATE`:
     /// enable, then the index), when restarting is on.
     pub fn primitive_restart(&self) -> Option<u32> {
@@ -615,6 +627,17 @@ mod tests {
         assert_eq!(state.color_target_count(), 2);
         assert_eq!(state.color_target_index(0), 3);
         assert_eq!(state.color_target_index(1), 5);
+    }
+
+    #[test]
+    fn depth_bias_reads_its_registers() {
+        let mut state = MaxwellState::default();
+        assert_eq!(state.depth_bias(), None);
+        state.write(m::DEPTH_BIAS_STATE + 8, 1);
+        state.write(m::DEPTH_BIAS_FACTOR, 1.5f32.to_bits());
+        state.write(m::DEPTH_BIAS_UNITS, (-2.0f32).to_bits());
+        state.write(m::DEPTH_BIAS_CLAMP, 0.25f32.to_bits());
+        assert_eq!(state.depth_bias(), Some((1.5, -2.0, 0.25)));
     }
 
     #[test]

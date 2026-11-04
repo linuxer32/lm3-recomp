@@ -64,16 +64,23 @@ Hardware behaviours the translation keeps:
 - `FMNMX` is NaN-aware (the other operand wins).
 - `F2I` clamps to the destination range and turns NaN into zero.
 - `RRO` passes its value through to `MUFU`.
+- `I2I` keeps the source's selected byte, sign, absolute value, negation,
+  saturation and destination width, and writes the N/Z flags when asked;
+  `CSETP` reads the N/Z/V/C flags. LM3's character vertex programs use
+  `I2I.S32.S32` with abs+neg and then `CSETP` on the result.
 - `PSETP` combines three predicates with two boolean operations and writes
   the result and its inverse (`P` and the predicate in bits 0:2).
+- Vertex programs sample textures at level 0: Vulkan has no implicit-LOD
+  samples outside fragment/compute programs, and Maxwell vertex texture
+  fetches have no derivatives to pick a level with.
 
 ## Instructions
 
 Translated: `MOV`, `MOV32I`, `FADD`, `FADD32I`, `FMUL`, `FMUL32I`, `FFMA`,
-`FMNMX`, `MUFU`, `FSETP`, `FSET`, `ISETP`, `ISET`, `PSETP`, `IADD`, `IADD32I`, `ISCADD`,
+`FMNMX`, `MUFU`, `FSETP`, `FSET`, `ISETP`, `ISET`, `PSETP`, `CSETP`, `IADD`, `IADD32I`, `ISCADD`,
 `IMNMX`, `SEL`, `FLO`, `LOP32I`, `LOP3` (any truth table), `BFE`, `BFI`,
-`SHL`, `SHR`, `F2I`, `I2F`, `F2F` (16/32-bit floats, rounding to integral
-values), `HADD2`, `HMUL2`, `HFMA2` (all forms; both half lanes computed as
+`SHL`, `SHR`, `F2I`, `I2F`, `I2I`, `F2F` (16/32-bit floats, rounding to integral
+values), `HADD2`, `HMUL2`, `HFMA2`, `HSETP2` (all forms; both half lanes computed as
 32-bit floats, as Ryujinx does), `RRO`, `IPA`, `ALD`, `AST`, `LDC` (default
 address mode), `XMAD` (16 x 16-bit multiply-add in all four operand forms;
 not `.X` or `CSFU`), `LDL`, `STL` (8 to 128 bits), and in compute programs

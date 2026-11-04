@@ -564,6 +564,8 @@ struct Translator<'a> {
     main: Id,
     registers: BTreeMap<u8, Id>,
     predicates: BTreeMap<u8, Id>,
+    /// Condition-code flags (N, Z, V, C), as local booleans.
+    flags: BTreeMap<u8, Id>,
     constant_buffers: BTreeMap<u32, Id>,
     /// Bytes read from the start of each constant buffer (see
     /// `TranslatedShader::uniform_extents`).
@@ -618,6 +620,7 @@ impl<'a> Translator<'a> {
             main,
             registers: BTreeMap::new(),
             predicates: BTreeMap::new(),
+            flags: BTreeMap::new(),
             constant_buffers: BTreeMap::new(),
             constant_extents: BTreeMap::new(),
             constant_array: None,
@@ -788,6 +791,33 @@ impl<'a> Translator<'a> {
             None => {
                 let id = self.b.local_variable(self.t.boolean);
                 self.predicates.insert(index, id);
+                id
+            }
+        };
+        self.b.store(var, value);
+    }
+
+    /// A condition-code flag: 0 N, 1 Z, 2 V, 3 C.
+    fn get_flag(&mut self, which: u8) -> Id {
+        let var = match self.flags.get(&which) {
+            Some(id) => *id,
+            None => {
+                let id = self.b.local_variable(self.t.boolean);
+                self.flags.insert(which, id);
+                let off = self.b.const_bool(false);
+                self.b.store(id, off);
+                id
+            }
+        };
+        self.b.load(self.t.boolean, var)
+    }
+
+    fn set_flag(&mut self, which: u8, value: Id) {
+        let var = match self.flags.get(&which) {
+            Some(id) => *id,
+            None => {
+                let id = self.b.local_variable(self.t.boolean);
+                self.flags.insert(which, id);
                 id
             }
         };
@@ -1367,6 +1397,15 @@ impl<'a> Translator<'a> {
         offset: Option<Id>,
         dref: Option<Id>,
     ) -> Id {
+        // Vertex programs have no derivatives, and Vulkan does not allow
+        // implicit-LOD samples there: sample level 0. (LM3's character
+        // shaders fetch vertex textures this way.)
+        let (lod, bias) = if self.is_fragment() {
+            (lod, bias)
+        } else {
+            let zero = self.b.const_f32(0.0);
+            (Some(lod.unwrap_or(zero)), None)
+        };
         let coords = match offset {
             Some(offset) => self.offset_coords(texture, coords, offset, lod),
             None => coords,
@@ -1992,6 +2031,7 @@ impl<'a> Translator<'a> {
                 let value = self.saturate(value, flag(word, 50));
                 self.set_f(rd, value);
             }
+            "CSETP" => self.csetp(ins)?,
             "PSETP" => {
                 // PSETP: combine three predicates with two boolean ops and
                 // write the result and its inverse. LM3's save screen uses
@@ -2361,6 +2401,8 @@ impl<'a> Translator<'a> {
                 let value = self.select_u(nan, zero, converted);
                 self.set_u(rd, value);
             }
+            "I2I" => self.i2i(ins)?,
+            "HSETP2" => self.hsetp2(ins)?,
             "HADD2" | "HMUL2" | "HFMA2" | "HADD232I" | "HMUL232I" => self.half_arithmetic(ins)?,
             "F2F" => {
                 // Between 16- and 32-bit floats (a half is a register's low
@@ -2653,6 +2695,228 @@ impl<'a> Translator<'a> {
             _ => return Err(unsupported(ins, "compare operation")),
         };
         Ok(self.b.inst(opcode, self.t.boolean, &[a, b]))
+    }
+
+    /// `CSETP`: combine a condition-code test with the source predicate and
+    /// write the predicate and its inverse. The shaders that failed before
+    /// use `Neu` after an `I2I` that writes the flags.
+    fn csetp(&mut self, ins: &Instruction) -> Result<(), TranslateError> {
+        let word = ins.word;
+        let condition = self.condition_code(ins, field(word, 8, 5))?;
+        let predicate = self.get_p(field(word, 39, 3) as u8, flag(word, 42));
+        let operation = field(word, 45, 2);
+        let (first, _) = self.combine(ins, operation, condition, predicate)?;
+        let inverted = self.b.inst(op::LOGICAL_NOT, self.t.boolean, &[condition]);
+        let (second, _) = self.combine(ins, operation, inverted, predicate)?;
+        self.set_p(field(word, 3, 3) as u8, first);
+        self.set_p(field(word, 0, 3) as u8, second);
+        Ok(())
+    }
+
+    /// A condition-code test (`CSETP`/`CSET`), from the N, Z, V and C flags.
+    fn condition_code(&mut self, ins: &Instruction, code: u32) -> Result<Id, TranslateError> {
+        let ty = self.t.boolean;
+        let (n, z, v, c) = (
+            self.get_flag(0),
+            self.get_flag(1),
+            self.get_flag(2),
+            self.get_flag(3),
+        );
+        let nz = self.b.inst(op::LOGICAL_NOT, ty, &[z]);
+        let not_n = self.b.inst(op::LOGICAL_NOT, ty, &[n]);
+        let nv = self.b.inst(op::LOGICAL_NOT_EQUAL, ty, &[n, v]);
+        let zv = self.b.inst(op::LOGICAL_OR, ty, &[z, v]);
+        let n_and_z = self.b.inst(op::LOGICAL_AND, ty, &[n, z]);
+        Ok(match code {
+            0 => self.b.const_bool(false),
+            1 => {
+                let n_and_nz = self.b.inst(op::LOGICAL_AND, ty, &[n, nz]);
+                self.b.inst(op::LOGICAL_NOT_EQUAL, ty, &[n_and_nz, v])
+            }
+            2 => self.b.inst(op::LOGICAL_AND, ty, &[not_n, z]),
+            3 => self.b.inst(op::LOGICAL_NOT_EQUAL, ty, &[n, zv]),
+            4 => {
+                let nv_or_z = self.b.inst(op::LOGICAL_OR, ty, &[nv, z]);
+                self.b.inst(op::LOGICAL_NOT, ty, &[nv_or_z])
+            }
+            5 => nz,
+            6 => self.b.inst(op::LOGICAL_NOT, ty, &[nv]),
+            7 => self.b.inst(op::LOGICAL_NOT, ty, &[n_and_z]),
+            8 => n_and_z,
+            9 => nv,
+            10 => z,
+            11 => self.b.inst(op::LOGICAL_OR, ty, &[nv, z]),
+            12 => {
+                let v_or_z = self.b.inst(op::LOGICAL_OR, ty, &[v, z]);
+                self.b.inst(op::LOGICAL_NOT_EQUAL, ty, &[not_n, v_or_z])
+            }
+            13 => self.b.inst(op::LOGICAL_OR, ty, &[n, nz]),
+            14 => {
+                let nz_or_z = self.b.inst(op::LOGICAL_OR, ty, &[not_n, z]);
+                self.b.inst(op::LOGICAL_NOT_EQUAL, ty, &[nz_or_z, v])
+            }
+            15 => self.b.const_bool(true),
+            16 => self.b.inst(op::LOGICAL_NOT, ty, &[v]),
+            17 => self.b.inst(op::LOGICAL_NOT, ty, &[c]),
+            18 => not_n,
+            19 => {
+                let not_c = self.b.inst(op::LOGICAL_NOT, ty, &[c]);
+                self.b.inst(op::LOGICAL_OR, ty, &[z, not_c])
+            }
+            20 => self.b.inst(op::LOGICAL_AND, ty, &[c, nz]),
+            21 => n,
+            22 => c,
+            23 => v,
+            30 => self.b.inst(op::LOGICAL_OR, ty, &[n, z]),
+            31 => {
+                let n_or_z = self.b.inst(op::LOGICAL_OR, ty, &[n, z]);
+                self.b.inst(op::LOGICAL_NOT, ty, &[n_or_z])
+            }
+            _ => return Err(unsupported(ins, format!("condition code {code}"))),
+        })
+    }
+
+    /// `I2I`: an integer conversion, optionally selecting one byte of the
+    /// source, taking its absolute value and negating it, and saturating to
+    /// the destination width. LM3's character shaders use `I2I.S32.S32` with
+    /// abs+neg for the sign of a value; without it those programs failed to
+    /// translate and every draw using them was skipped.
+    fn i2i(&mut self, ins: &Instruction) -> Result<(), TranslateError> {
+        let word = ins.word;
+        let rd = register(word, 0);
+        let src = self.operand_b_u(ins)?;
+        // Source and destination formats are three-bit fields: unsigned
+        // 8/16/32 and signed 8/16/32 (3 and 7 are invalid).
+        let src_format = (((word >> 13) & 1) as u32) << 2 | ((word >> 10) & 3) as u32;
+        let dst_format = (((word >> 12) & 1) as u32) << 2 | ((word >> 8) & 3) as u32;
+        let src_size = match src_format {
+            0 | 4 => 8,
+            1 | 5 => 16,
+            2 | 6 => 32,
+            _ => return Err(unsupported(ins, "I2I source format")),
+        };
+        let dst_size = match dst_format {
+            0 | 4 => 8,
+            1 | 5 => 16,
+            2 | 6 => 32,
+            _ => return Err(unsupported(ins, "I2I destination format")),
+        };
+        let src_signed = src_format >= 4;
+        let dst_signed = dst_format >= 4;
+        let mut value = if src_size < 32 {
+            let offset = self.b.const_u32(field(word, 41, 2) * src_size as u32);
+            let width = self.b.const_u32(src_size as u32);
+            self.b.inst(
+                if src_signed {
+                    op::BIT_FIELD_S_EXTRACT
+                } else {
+                    op::BIT_FIELD_U_EXTRACT
+                },
+                self.t.uint,
+                &[src, offset, width],
+            )
+        } else {
+            src
+        };
+        if flag(word, 53) {
+            // Absolute value: `max(value, -value)` for signed values.
+            let negated = self.b.inst(op::S_NEGATE, self.t.uint, &[value]);
+            if src_signed {
+                value = self.b.ext(self.t.uint, glsl::S_MAX, &[value, negated]);
+            }
+        }
+        if flag(word, 49) {
+            value = self.b.inst(op::S_NEGATE, self.t.uint, &[value]);
+        }
+        if flag(word, 50) {
+            let (low, high) = match dst_format {
+                0 => (0, u8::MAX as u32),
+                1 => (0, u16::MAX as u32),
+                2 => (0, u32::MAX),
+                4 => (i8::MIN as i32 as u32, i8::MAX as u32),
+                5 => (i16::MIN as i32 as u32, i16::MAX as u32),
+                _ => (i32::MIN as u32, i32::MAX as u32),
+            };
+            let low = self.b.const_u32(low);
+            let high = self.b.const_u32(high);
+            value = if dst_signed {
+                let low = self.b.ext(self.t.uint, glsl::S_MAX, &[value, low]);
+                self.b.ext(self.t.uint, glsl::S_MIN, &[low, high])
+            } else {
+                let low = self.b.ext(self.t.uint, glsl::U_MAX, &[value, low]);
+                self.b.ext(self.t.uint, glsl::U_MIN, &[low, high])
+            };
+        }
+        if dst_size < 32 {
+            let zero = self.b.const_u32(0);
+            let width = self.b.const_u32(dst_size as u32);
+            value = self.b.inst(
+                if dst_signed {
+                    op::BIT_FIELD_S_EXTRACT
+                } else {
+                    op::BIT_FIELD_U_EXTRACT
+                },
+                self.t.uint,
+                &[value, zero, width],
+            );
+        }
+        self.set_u(rd, value);
+        if flag(word, 47) {
+            let zero = self.b.const_u32(0);
+            let n = self.b.inst(op::S_LESS_THAN, self.t.boolean, &[value, zero]);
+            let z = self.b.inst(op::I_EQUAL, self.t.boolean, &[value, zero]);
+            let off = self.b.const_bool(false);
+            self.set_flag(0, n);
+            self.set_flag(1, z);
+            self.set_flag(2, off);
+            self.set_flag(3, off);
+        }
+        Ok(())
+    }
+
+    /// `HSETP2`: compare both halves of two packed values, combine each
+    /// result with the source predicate, and write the predicate and its
+    /// inverse. The fragment shaders that use it were skipped before.
+    fn hsetp2(&mut self, ins: &Instruction) -> Result<(), TranslateError> {
+        let word = ins.word;
+        let a_bits = self.get_u(register(word, 8));
+        let a = self.half_pair(a_bits, field(word, 47, 2));
+        let a = self.half_modifiers(a, flag(word, 48), flag(word, 43));
+        let (b, compare, hand) = match ins.src_b {
+            Operand::Register(_) => {
+                let bits = self.get_u(register(word, 20));
+                let b = self.half_pair(bits, field(word, 28, 2));
+                let b = self.half_modifiers(b, flag(word, 30), flag(word, 31));
+                (b, field(word, 35, 4), flag(word, 49))
+            }
+            Operand::Immediate(_) => {
+                let b = self.half_immediate(
+                    field(word, 20, 10) << 6,
+                    (field(word, 30, 9) | (field(word, 56, 1) << 9)) << 6,
+                );
+                (b, field(word, 49, 4), flag(word, 53))
+            }
+            Operand::Constant { .. } => {
+                let bits = self.cbuf_u(field(word, 34, 5), field(word, 20, 14) * 4);
+                let b = self.half_pair(bits, 1);
+                let b = self.half_modifiers(b, flag(word, 54), flag(word, 56));
+                (b, field(word, 49, 4), flag(word, 53))
+            }
+            _ => return Err(unsupported(ins, "HSETP2 operand B form")),
+        };
+        let mut low = self.float_compare(ins, compare, a[0], b[0])?;
+        let mut high = self.float_compare(ins, compare, a[1], b[1])?;
+        if hand {
+            low = self.b.inst(op::LOGICAL_AND, self.t.boolean, &[low, high]);
+            high = self.b.inst(op::LOGICAL_NOT, self.t.boolean, &[low]);
+        }
+        let predicate = self.get_p(field(word, 39, 3) as u8, flag(word, 42));
+        let operation = field(word, 45, 2);
+        let (first, _) = self.combine(ins, operation, low, predicate)?;
+        let (second, _) = self.combine(ins, operation, high, predicate)?;
+        self.set_p(field(word, 3, 3) as u8, first);
+        self.set_p(field(word, 0, 3) as u8, second);
+        Ok(())
     }
 
     /// Combine a comparison with a predicate (AND/OR/XOR): the result, and
@@ -4050,6 +4314,23 @@ mod tests {
         assert_eq!(half_to_f32(0x3C00), 1.0);
         assert_eq!(half_to_f32(0xC000), -2.0);
         assert_eq!(half_to_f32(0x0001), 2f32.powi(-24));
+    }
+
+    #[test]
+    fn i2i_and_hsetp2_translate() {
+        // I2I.S32.S32 R2, R1 with abs and neg: the form LM3's character
+        // vertex shaders use.
+        let i2i = 0x5ce2_0000_0017_3a02;
+        let bytes = program(1, 0, &[i2i, exit()]);
+        let shader = translate(&bytes, &Environment::default()).expect("I2I translates");
+        validate("i2i", &shader.words);
+
+        // HSETP2 P0, PT, |R23|, RZ, PT (equal): the fragment form LM3's
+        // material shaders use.
+        let hsetp2 = 0x5d21_0390_2ff7_1707;
+        let bytes = program(5, 0, &[hsetp2, exit()]);
+        let shader = translate(&bytes, &Environment::default()).expect("HSETP2 translates");
+        validate("hsetp2", &shader.words);
     }
 
     #[test]

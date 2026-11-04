@@ -278,6 +278,12 @@ the camera moved and lights came and went with its angle. Taken the yuzu way
 round (flip turning the winding), LM3's back-face culling removed every
 front face.
 
+Draws also take the guest's polygon offset (`DEPTH_BIAS_STATE`, factor,
+units and clamp): Vulkan's constant factor is the guest's units, its slope
+factor the guest's factor, and its clamp the guest's clamp when the device
+has the `depthBiasClamp` feature. Coplanar details such as a crown on a
+head or decals on a floor z-fight without it.
+
 Depth-stencil targets are images too (24-bit depth becomes 32-bit float depth:
 AMD's Vulkan drivers have none), attached when the draw enables its depth
 target, with depth test, write and compare state and the stencil test (both

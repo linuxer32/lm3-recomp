@@ -87,8 +87,10 @@ fn main() {
         .and_then(|path| std::fs::read(path).ok())
         .map(|bytes| {
             bytes
-                .chunks_exact(4)
-                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u32::from_le_bytes(*chunk))
                 .collect::<Vec<u32>>()
         });
 
@@ -148,7 +150,7 @@ fn main() {
         match result {
             Ok(()) => {
                 created += 1;
-                if created % 10 == 0 {
+                if created.is_multiple_of(10) {
                     save_cache(&device, cache, &output);
                 }
             }
@@ -256,8 +258,11 @@ fn read_spirv(path: &Path) -> Result<Vec<u32>, String> {
         return Err("SPIR-V size is not a multiple of 4".into());
     }
     Ok(bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(u32::from_le_bytes)
         .collect())
 }
 
@@ -391,10 +396,8 @@ fn output_formats(words: &[u32]) -> [vk::Format; 8] {
             23 if count >= 4 => {
                 vector_component.insert(words[at + 1], words[at + 2]);
             }
-            71 if count >= 4 => {
-                if words[at + 2] == 30 {
-                    location.insert(words[at + 1], words[at + 3]);
-                }
+            71 if count >= 4 && words[at + 2] == 30 => {
+                location.insert(words[at + 1], words[at + 3]);
             }
             _ => {}
         }

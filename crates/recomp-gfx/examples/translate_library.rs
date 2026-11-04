@@ -69,12 +69,14 @@ fn main() {
             continue;
         };
         let stage = header.stage;
-        let mut environment = Environment::default();
+        let mut environment = Environment {
+            clip_distances: 0,
+            ..Environment::default()
+        };
         // The library stores the shaders, not the draws that use them. Start
         // with the common float/float environment; the manifest records it so
         // other variants can be added. `SHADER_COLOR_TYPE=uint|int` builds a
         // variant for integer render targets, which changes the SPIR-V.
-        environment.clip_distances = 0;
         if let Ok(kind) = std::env::var("SHADER_COLOR_TYPE") {
             let kind = match kind.as_str() {
                 "uint" => AttributeType::UnsignedInt,

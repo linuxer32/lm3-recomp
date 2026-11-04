@@ -480,6 +480,7 @@ impl VulkanRenderer {
             .shader_image_gather_extended(supported.shader_image_gather_extended == vk::TRUE)
             .shader_clip_distance(supported.shader_clip_distance == vk::TRUE)
             .depth_clamp(supported.depth_clamp == vk::TRUE)
+            .depth_bias_clamp(supported.depth_bias_clamp == vk::TRUE)
             .sampler_anisotropy(supported.sampler_anisotropy == vk::TRUE);
         let mut features13 = vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
         // Depth clip control lets pipelines keep the guest's -1..1 depth.
@@ -630,6 +631,7 @@ impl VulkanRenderer {
             command_pool,
             depth_clip_control,
             supported.depth_clamp == vk::TRUE,
+            supported.depth_bias_clamp == vk::TRUE,
             dynamic_rendering,
         )?;
         // The menu uses dynamic rendering; on Vulkan 1.1/1.2 it is skipped

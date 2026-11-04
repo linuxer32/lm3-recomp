@@ -848,6 +848,8 @@ pub struct Gpu {
     depth_clip_control: bool,
     /// The device enabled the `depthClamp` feature.
     depth_clamp: bool,
+    /// The device enabled the `depthBiasClamp` feature.
+    depth_bias_clamp: bool,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     uniform_alignment: u64,
     set_layout: vk::DescriptorSetLayout,
@@ -1164,6 +1166,7 @@ fn pipeline_cache_path() -> Option<std::path::PathBuf> {
 }
 
 impl Gpu {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
@@ -1171,6 +1174,7 @@ impl Gpu {
         command_pool: vk::CommandPool,
         depth_clip_control: bool,
         depth_clamp: bool,
+        depth_bias_clamp: bool,
         dynamic_rendering: bool,
     ) -> Result<Self, String> {
         let memory_properties =
@@ -1368,6 +1372,7 @@ impl Gpu {
             },
             depth_clip_control,
             depth_clamp,
+            depth_bias_clamp,
             memory_properties,
             uniform_alignment: limits.min_uniform_buffer_offset_alignment.max(16),
             set_layout,
@@ -5157,6 +5162,15 @@ impl Gpu {
                 | (u64::from(front.as_raw() as u32) << 8)
                 | (u64::from(restart) << 16),
         );
+        match draw.depth_bias {
+            Some((factor, units, clamp)) => key.extend([
+                1,
+                u64::from(factor.to_bits()),
+                u64::from(units.to_bits()),
+                u64::from(clamp.to_bits()),
+            ]),
+            None => key.extend([0, 0, 0, 0]),
+        }
         key.extend(vertex_key.1.iter().map(|value| u64::from(*value)));
         if let Some((front, back)) = draw.stencil {
             for face in [front, back] {
@@ -5293,7 +5307,7 @@ impl Gpu {
             viewport_state = viewport_state.push_next(&mut depth_clip);
         }
         // Without depth clip control, -1..1 depth would be clipped at 0.
-        let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
+        let mut rasterization = vk::PipelineRasterizationStateCreateInfo::default()
             // `depthClamp` is a device feature: enabling it without asking
             // for it makes Adreno refuse the pipeline (VK_ERROR_UNKNOWN),
             // and that path is only taken without VK_EXT_depth_clip_control.
@@ -5302,6 +5316,16 @@ impl Gpu {
             .cull_mode(cull_mode(draw.cull_enable, draw.cull_face))
             .front_face(front_face(draw.front_face, draw.y_control))
             .line_width(1.0);
+        // Polygon offset keeps coplanar details (a crown on a head, decals
+        // and shadows on a floor) from z-fighting. Vulkan's constant factor
+        // is the guest's units and its slope factor the guest's factor.
+        if let Some((factor, units, clamp)) = draw.depth_bias {
+            rasterization = rasterization
+                .depth_bias_enable(true)
+                .depth_bias_slope_factor(factor)
+                .depth_bias_constant_factor(units)
+                .depth_bias_clamp(if self.depth_bias_clamp { clamp } else { 0.0 });
+        }
         let multisample = vk::PipelineMultisampleStateCreateInfo::default()
             .rasterization_samples(vk::SampleCountFlags::TYPE_1);
         // Integer attachments cannot blend.
