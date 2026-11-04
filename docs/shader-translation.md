@@ -156,7 +156,9 @@ validate (with the captured constant buffer 1, `<name>.cb1`, which
 
 ## Not done yet
 
-- Geometry and tessellation programs; indexed attribute access; `SHFL`
+- Geometry and tessellation programs. Patches are drawn as their control
+  mesh's triangles as a fallback (the floor is visible, without tessellated
+  displacement); indexed attribute access; `SHFL`
   across more than a quad; `LOP.X`; `BRX` not through a jump table; bindless handles from
   anywhere but c[2], or more than four entries past their base;
   `TXQ` queries other than the size;

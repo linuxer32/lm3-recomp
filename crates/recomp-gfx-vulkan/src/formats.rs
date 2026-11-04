@@ -423,6 +423,10 @@ pub fn topology(topology: PrimitiveTopology) -> Option<vk::PrimitiveTopology> {
         }
         PrimitiveTopology::TriangleStrip => vk::PrimitiveTopology::TRIANGLE_STRIP,
         PrimitiveTopology::TriangleFan => vk::PrimitiveTopology::TRIANGLE_FAN,
+        // Tessellation is not translated yet. Draw the patch control mesh
+        // as triangles: the coarse floor/object is visible instead of being
+        // skipped entirely.
+        PrimitiveTopology::Patches => vk::PrimitiveTopology::TRIANGLE_LIST,
         _ => return None,
     })
 }
