@@ -294,9 +294,9 @@ Depth-stencil targets are images too (24-bit depth becomes 32-bit float depth:
 AMD's Vulkan drivers have none), attached when the draw enables its depth
 target, with depth test, write and compare state and the stencil test (both
 faces' ops, comparison, reference and masks, in the guest's Direct3D-style or
-OpenGL encoding) in the pipeline. The test is enabled per face: a light volume
-is a back-facing shell with its front faces culled and sets only the back
-face's enable, so the back state must be kept when the front is off. LM3's
+OpenGL encoding) in the pipeline. LM3's light volumes are back-facing shells
+with their front faces culled and set only the back face's enable, so the
+back state must be kept when the front is off. LM3's
 deferred lighting shades only the pixels a light or reflection volume marked
 in stencil; without the test the volumes shaded their whole boxes on screen
 (rectangles in the lobby and the elevator). LM3's gem-glow full-screen pass
