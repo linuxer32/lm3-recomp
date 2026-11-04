@@ -86,6 +86,32 @@ fn texture_binding_fits(binding: u32) -> bool {
     (TEXTURE_BINDING_BASE..TEXTURE_BINDING_BASE + TEXTURE_BINDINGS).contains(&binding)
 }
 
+/// Whether a shader's texture kind and a header's target can share a view.
+///
+/// A one-row lookup table can be sampled through a 2D instruction, and a
+/// 1D-array header through a 2D-array one: both are uploaded as the flattened
+/// view the shader names (see `prepare_texture`). Rejecting the header before
+/// that conversion would sample the magenta placeholder instead; LM3's
+/// PearlescentLUT is a one-row table of this shape.
+fn texture_target_supported(kind: TextureKind, target: Option<Target>) -> bool {
+    matches!(
+        (kind, target),
+        (TextureKind::D1, Some(Target::D1 | Target::D1Array))
+            | (TextureKind::D2, Some(Target::D1 | Target::D1Array))
+            | (TextureKind::D2, Some(Target::D2 | Target::D2NoMipmap))
+            | (TextureKind::D2Array, Some(Target::D1Array))
+            | (TextureKind::D2Array, Some(Target::D2Array))
+            | (
+                TextureKind::Cube,
+                Some(Target::Cube | Target::D2 | Target::D2NoMipmap | Target::D2Array)
+            )
+            | (
+                TextureKind::D3,
+                Some(Target::D2 | Target::D2NoMipmap | Target::D3)
+            )
+    )
+}
+
 /// The address a window capture's readback names (no target is there).
 const WINDOW_CAPTURE: u64 = u64::MAX;
 
@@ -4613,20 +4639,8 @@ impl Gpu {
         kind: TextureKind,
     ) -> Result<(vk::ImageView, bool), String> {
         // The texture kinds a shader samples and the header kinds it can
-        // name: 2D, 2D arrays and cube maps are uploaded.
-        let supported = matches!(
-            (kind, header.target()),
-            (TextureKind::D2, Some(Target::D2 | Target::D2NoMipmap))
-                | (TextureKind::D2Array, Some(Target::D2Array))
-                | (
-                    TextureKind::Cube,
-                    Some(Target::Cube | Target::D2 | Target::D2NoMipmap | Target::D2Array)
-                )
-                | (
-                    TextureKind::D3,
-                    Some(Target::D2 | Target::D2NoMipmap | Target::D3)
-                )
-        );
+        // name: 1D tables, 2D images, arrays and cube maps are uploaded.
+        let supported = texture_target_supported(kind, header.target());
         if !supported {
             self.warn(format!(
                 "{kind:?} textures ({:?} headers, format {:#x}) not uploaded yet",
@@ -6567,5 +6581,24 @@ mod tests {
             TEXTURE_BINDING_BASE + TEXTURE_BINDINGS
         ));
         assert!(!texture_binding_fits(TEXTURE_BINDING_BASE - 1));
+    }
+
+    #[test]
+    fn one_row_lookup_tables_are_supported() {
+        assert!(texture_target_supported(TextureKind::D1, Some(Target::D1)));
+        assert!(texture_target_supported(
+            TextureKind::D1,
+            Some(Target::D1Array)
+        ));
+        assert!(texture_target_supported(TextureKind::D2, Some(Target::D1)));
+        assert!(texture_target_supported(
+            TextureKind::D2,
+            Some(Target::D1Array)
+        ));
+        assert!(texture_target_supported(
+            TextureKind::D2Array,
+            Some(Target::D1Array)
+        ));
+        assert!(!texture_target_supported(TextureKind::D3, Some(Target::D1)));
     }
 }
