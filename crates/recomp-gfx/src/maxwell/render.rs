@@ -351,6 +351,17 @@ impl DrawCall {
             None
         };
 
+        // LM3's light and gem-glow volumes are back-facing shells whose
+        // front face leaves the stencil test off. The back face marks the
+        // pixels they may shade; dropping it because the front is off let
+        // them shade their whole boxes (a cyan orb around Hellen Gravely's
+        // necklace in the lobby).
+        let mut stencil = state.stencil();
+        if stencil.is_none() && matches!(shader_addresses[5], Some(0x4016cb030) | Some(0x400990030))
+        {
+            stencil = state.stencil_back();
+        }
+
         Self {
             parameters,
             index_buffer,
@@ -368,7 +379,7 @@ impl DrawCall {
             depth_test_enable: state.depth_test_enable(),
             depth_write_enable: state.depth_write_enable(),
             depth_test_func: state.depth_test_func(),
-            stencil: state.stencil(),
+            stencil,
             blend_enables,
             cull_enable: state.cull_enable(),
             front_face: state.front_face(),

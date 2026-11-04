@@ -294,10 +294,15 @@ Depth-stencil targets are images too (24-bit depth becomes 32-bit float depth:
 AMD's Vulkan drivers have none), attached when the draw enables its depth
 target, with depth test, write and compare state and the stencil test (both
 faces' ops, comparison, reference and masks, in the guest's Direct3D-style or
-OpenGL encoding) in the pipeline. LM3's deferred lighting shades only the
-pixels a light or reflection volume marked in stencil; without the test the
-volumes shaded their whole boxes on screen (rectangles in the lobby and the
-elevator). Draws with
+OpenGL encoding) in the pipeline. The test is enabled per face: a light volume
+is a back-facing shell with its front faces culled and sets only the back
+face's enable, so the back state must be kept when the front is off. LM3's
+deferred lighting shades only the pixels a light or reflection volume marked
+in stencil; without the test the volumes shaded their whole boxes on screen
+(rectangles in the lobby and the elevator). LM3's gem-glow full-screen pass
+(fragment `0x400990030`) is skipped: its screen-space mask is not reproduced
+yet, and the unresolved pass painted a giant cyan orb around Hellen Gravely's
+necklace in the lobby. The rest of the frame is unchanged. Draws with
 only a depth target (shadow maps) run, clears are executed, and a texture at a
 depth target's address samples its depth. An address can hold both a color
 target and a depth target at different times. A header with a depth format

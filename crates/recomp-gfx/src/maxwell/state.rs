@@ -336,6 +336,26 @@ impl MaxwellState {
         Some((front, back))
     }
 
+    /// The stencil test of a back-facing shell whose front face leaves the
+    /// test off: the front face always passes and writes nothing, and the
+    /// back face's state does the masking. LM3's light and glow volumes set
+    /// only the back face.
+    pub fn stencil_back(&self) -> Option<(StencilFace, StencilFace)> {
+        if self.read(m::STENCIL_BACK_TEST_STATE) & 1 == 0 {
+            return None;
+        }
+        let back = StencilFace {
+            fail: self.read(m::STENCIL_BACK_TEST_STATE + 0x4),
+            depth_fail: self.read(m::STENCIL_BACK_TEST_STATE + 0x8),
+            pass: self.read(m::STENCIL_BACK_TEST_STATE + 0xC),
+            func: self.read(m::STENCIL_BACK_TEST_STATE + 0x10),
+            reference: self.read(m::STENCIL_BACK_MASKS) & 0xFF,
+            write_mask: self.read(m::STENCIL_BACK_MASKS + 0x4) & 0xFF,
+            compare_mask: self.read(m::STENCIL_BACK_MASKS + 0x8) & 0xFF,
+        };
+        Some((StencilFace::disabled(), back))
+    }
+
     pub fn cull_enable(&self) -> bool {
         self.read(m::FACE_STATE) & 1 != 0
     }
@@ -523,6 +543,24 @@ pub struct StencilFace {
     pub write_mask: u32,
 }
 
+impl StencilFace {
+    /// A face whose stencil test the guest leaves disabled: the comparison
+    /// always passes and nothing is written, so only the other face's state
+    /// has an effect.
+    fn disabled() -> Self {
+        Self {
+            // KEEP for all three outcomes, ALWAYS for the comparison.
+            fail: 1,
+            depth_fail: 1,
+            pass: 1,
+            func: 8,
+            reference: 0,
+            compare_mask: 0,
+            write_mask: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ViewportTransform {
     pub scale: [f32; 3],
@@ -632,6 +670,45 @@ mod tests {
         assert_eq!(state.color_target_count(), 2);
         assert_eq!(state.color_target_index(0), 3);
         assert_eq!(state.color_target_index(1), 5);
+    }
+
+    #[test]
+    fn a_back_only_stencil_test_is_kept() {
+        let mut state = MaxwellState::default();
+        // The front face's test is off; the back face's is on. LM3's light
+        // volumes set this for their back-facing shells.
+        state.write(m::STENCIL_TEST_STATE, 0);
+        state.write(m::STENCIL_BACK_TEST_STATE, 1);
+        state.write(m::STENCIL_BACK_TEST_STATE + 0x10, 6);
+        state.write(m::STENCIL_BACK_MASKS, 0);
+        state.write(m::STENCIL_BACK_MASKS + 4, 3);
+        state.write(m::STENCIL_BACK_MASKS + 8, 3);
+        let (front, back) = state.stencil_back().expect("back face's test");
+        assert_eq!(front.func, 8, "the disabled front face always passes");
+        assert_eq!(front.write_mask, 0);
+        assert_eq!(back.func, 6);
+        assert_eq!(back.reference, 0);
+        assert_eq!(back.compare_mask, 3);
+        assert_eq!(back.write_mask, 3);
+    }
+
+    #[test]
+    fn a_front_only_stencil_test_applies_to_both_faces() {
+        let mut state = MaxwellState::default();
+        state.write(m::STENCIL_TEST_STATE, 1);
+        state.write(m::STENCIL_TEST_STATE + 0x10, 3);
+        state.write(m::STENCIL_BACK_TEST_STATE, 0);
+        let (front, back) = state.stencil().expect("front face's test");
+        assert_eq!(front.func, 3);
+        assert_eq!(back, front, "the back face uses the front's state");
+    }
+
+    #[test]
+    fn no_stencil_test_when_neither_face_is_enabled() {
+        let mut state = MaxwellState::default();
+        state.write(m::STENCIL_TEST_STATE, 0);
+        state.write(m::STENCIL_BACK_TEST_STATE, 0);
+        assert_eq!(state.stencil(), None);
     }
 
     #[test]
