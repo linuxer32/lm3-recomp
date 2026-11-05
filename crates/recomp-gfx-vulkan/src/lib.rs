@@ -19,6 +19,7 @@ mod gpu;
 mod input;
 mod overlay;
 mod paths;
+mod probe;
 mod shader_pack;
 mod texture;
 
@@ -802,10 +803,29 @@ impl VulkanRenderer {
                 }
             }
         }
+        // `RECOMP_VULKAN_PROBE` saves each frame whose draws it logged.
+        let probe_round = frame.and_then(|_| {
+            let presented = self.presented + 1;
+            self.gpu.probe.as_mut()?.frame(presented)
+        });
+        let probed = probe_round
+            .as_ref()
+            .and_then(|(dir, capture)| match capture {
+                Some(address) => Some((self.gpu.target_at_any(&[*address])?, dir.clone())),
+                None => frame.map(|(key, _)| (key, dir.clone())),
+            });
+        // Crops wait for the frame they belong to (LM3 records a frame in
+        // two submissions).
+        let probe_crops = if probe_round.is_some() {
+            self.gpu.take_probe_crops()
+        } else {
+            Vec::new()
+        };
         // At most one readback per submission: a dumped target, or the
         // frame being presented.
         let wanted = match (self.dump_queue.pop(), &self.dump, &self.capture) {
             (Some(key), Some((dir, _)), _) => Some((key, dir.clone())),
+            _ if probed.is_some() => probed,
             (_, _, Some((dir, every)))
                 if index.is_some()
                     && self.presented + 1 >= self.capture_from
@@ -947,6 +967,10 @@ impl VulkanRenderer {
 
         self.submissions += 1;
         self.queue_submits += 1;
+        if let (false, Some((dir, _))) = (probe_crops.is_empty(), &probe_round) {
+            self.gpu.wait_submitted().map_err(failed("fence wait"))?;
+            self.gpu.write_probe_crops(probe_crops, dir);
+        }
         if let Some((readback, dir)) = readback {
             // A readback is read once the submission that copied it has run.
             self.gpu.wait_submitted().map_err(failed("fence wait"))?;

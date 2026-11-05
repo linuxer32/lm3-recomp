@@ -108,12 +108,18 @@ A state write is stored in the register file; these offsets also do something:
 | `VB_ELEMENT_U8/16/32` | inline index elements, least significant first |
 | `CLEAR`       | color and/or depth-stencil clear                  |
 | `SEMAPHORE_CONTROL` | report: release a payload, optionally with a timestamp |
-| `UNIFORM_BUFFER_UPDATE_DATA` | inline constant-buffer word              |
+| `UNIFORM_BUFFER_UPDATE_DATA` (16 words) | inline constant-buffer word  |
 | `SYNCPOINT_ACTION` | counted; the processor has no hardware caches   |
 
 Inline constant-buffer updates mirror Ryujinx's `ConstantBufferUpdater`: the
 word is written to guest memory at the bound buffer's address plus its offset,
-and the offset register advances by four. Direct draws take their range from
+and the offset register advances by four. There are 16 data registers
+(CB_DATA0..15), and a word written to any of them is update data: NVN sends
+some updates with an increasing header that walks them. Taking only CB_DATA0
+dropped the rest of each such update, and the draws read whatever an earlier
+draw had left in those words: the glint card on Hellen Gravely's pendant in
+LM3's lobby (fragment program 0x4000c4030) read leftover words such as
+(-2, 2) as its color. Direct draws take their range from
 `VERTEX_BUFFER_DRAW_STATE`, indexed draws from `INDEX_BUFFER_COUNT` and the
 bound index buffer.
 

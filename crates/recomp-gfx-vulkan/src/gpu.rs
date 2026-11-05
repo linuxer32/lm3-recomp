@@ -249,6 +249,14 @@ struct CachedVertices {
     checked: Option<u64>,
 }
 
+/// A copy of part of a target for `RECOMP_VULKAN_PROBE`: its file name and
+/// where its texels are in the crop buffer.
+pub struct ProbeCrop {
+    name: String,
+    offset: u64,
+    len: u64,
+}
+
 /// Guest page size: the unit writes are watched in.
 const GUEST_PAGE: u64 = 0x1000;
 
@@ -1020,6 +1028,12 @@ pub struct Gpu {
     pub trace: Option<Vec<String>>,
     /// The textures the draw being traced samples.
     traced_textures: Vec<String>,
+    /// `RECOMP_VULKAN_PROBE`: chosen draws' inputs over a few frames.
+    pub probe: Option<crate::probe::Probe>,
+    /// Its crops of targets, copied into `probe_crop_buffer` as the frame
+    /// records and written out once the frame's submission has run.
+    probe_crops: Vec<ProbeCrop>,
+    probe_crop_buffer: Option<Stream>,
     /// The least anisotropic filtering samplers get
     /// (`RECOMP_ANISOTROPY`, else 1: what the guest asks for), and the
     /// device's most (1 without the feature).
@@ -1465,6 +1479,9 @@ impl Gpu {
             descriptor_sets: 0,
             trace: None,
             traced_textures: Vec::new(),
+            probe: crate::probe::Probe::from_env(),
+            probe_crops: Vec::new(),
+            probe_crop_buffer: None,
             anisotropy: std::env::var("RECOMP_ANISOTROPY")
                 .ok()
                 .and_then(|value| value.parse().ok())
@@ -1506,6 +1523,29 @@ impl Gpu {
         self.flush_clears();
         let src_address = canonical(memory, blit.src.address);
         let dst_address = canonical(memory, blit.dst.address);
+        if self
+            .probe
+            .as_ref()
+            .is_some_and(|probe| probe.watches(dst_address))
+        {
+            let line = format!(
+                "  copy into a watched target: {:#x} {}x{} fmt {:#x} -> {:#x} {}x{} fmt {:#x} rect {:?} (source rendered: {}, submission {})",
+                blit.src.address,
+                blit.src.width,
+                blit.src.height,
+                blit.src.format,
+                blit.dst.address,
+                blit.dst.width,
+                blit.dst.height,
+                blit.dst.format,
+                blit.dst_rect,
+                self.target_at.contains_key(&src_address),
+                self.submission,
+            );
+            if let Some(probe) = self.probe.as_mut() {
+                probe.line(line);
+            }
+        }
         if let Some(trace) = self.trace.as_mut() {
             trace.push(format!(
                 "blit {:#x} {}x{} fmt {:#x} -> {:#x} {}x{} fmt {:#x} rect {:?} from {:?} step {:?}{}",
@@ -2785,6 +2825,27 @@ impl Gpu {
         }
         self.begin()?;
         let target = &clear.target;
+        let watched = canonical(memory, target.address);
+        if self
+            .probe
+            .as_ref()
+            .is_some_and(|probe| probe.watches(watched))
+        {
+            let line = format!(
+                "  depth clear of a watched target {:#x} {}x{} depth {} ({}) stencil {} ({}) (submission {})",
+                target.address,
+                clear.width,
+                clear.height,
+                clear.depth,
+                clear.clear_depth,
+                clear.stencil,
+                clear.clear_stencil,
+                self.submission,
+            );
+            if let Some(probe) = self.probe.as_mut() {
+                probe.line(line);
+            }
+        }
         let Some(key) = self.depth_target(
             memory,
             target.address,
@@ -3104,6 +3165,26 @@ impl Gpu {
             return Ok(());
         }
         self.begin()?;
+        if self
+            .probe
+            .as_ref()
+            .is_some_and(|probe| probe.watches(canonical(memory, clear.target.address)))
+        {
+            let target = &clear.target;
+            let line = format!(
+                "  clear of a watched target {:#x} {}x{} fmt {:#x} mask {:#x} to {:?} (submission {})",
+                target.address,
+                target.width_or_stride,
+                target.height,
+                target.format,
+                clear.component_mask,
+                clear.color,
+                self.submission,
+            );
+            if let Some(probe) = self.probe.as_mut() {
+                probe.line(line);
+            }
+        }
         if let Some(trace) = self.trace.as_mut() {
             let target = &clear.target;
             trace.push(format!(
@@ -3624,6 +3705,43 @@ impl Gpu {
     /// skipped (and reported once).
     pub fn draw(&mut self, memory: &dyn GpuMemory, draw: &DrawCall) -> Result<(), String> {
         self.begin()?;
+        let (number, submission) = (self.draws + self.skipped, self.submission);
+        if let Some(probe) = self.probe.as_mut().filter(|probe| probe.rereading()) {
+            probe.reread(memory, number, submission);
+        }
+        let probed = self
+            .probe
+            .as_mut()
+            .is_some_and(|probe| probe.begin_draw(memory, draw));
+        let crops = if probed {
+            self.probe.as_ref().and_then(|probe| probe.crops())
+        } else {
+            None
+        };
+        if let Some((rect, snaps)) = &crops {
+            for address in snaps {
+                self.probe_crop(*address, &format!("d{number}-before"), *rect)?;
+            }
+        }
+        if probed {
+            if let Some(probe) = self.probe.as_mut() {
+                let cb1 = |stage| {
+                    draw.constant_buffer(stage, 1)
+                        .map(|binding| (binding.address, binding.size))
+                };
+                if let Some(address) = draw.vertex_shader() {
+                    probe.dump_program(memory, address, "vertex", cb1(1));
+                }
+                if let Some(address) = draw.fragment_shader() {
+                    probe.dump_program(memory, address, "fragment", cb1(5));
+                }
+            }
+        }
+        let produces = !probed
+            && self
+                .probe
+                .as_ref()
+                .is_some_and(|probe| probe.produces(memory, draw));
         let outcome = match self.record_draw(memory, draw) {
             Ok(true) => {
                 self.draws += 1;
@@ -3647,7 +3765,290 @@ impl Gpu {
                 describe_draw(draw, &outcome)
             ));
         }
+        if let (Some((rect, _)), Some(target)) = (&crops, draw.first_color_target_address()) {
+            self.probe_crop(
+                canonical(memory, target),
+                &format!("d{number}-after"),
+                *rect,
+            )?;
+        }
+        if probed {
+            if let Some(buffer) = draw.index_buffer {
+                let size: u64 = match buffer.index_type {
+                    recomp_gfx::maxwell::render::IndexType::U8 => 1,
+                    recomp_gfx::maxwell::render::IndexType::U16 => 2,
+                    recomp_gfx::maxwell::render::IndexType::U32 => 4,
+                };
+                let start = buffer.address + u64::from(draw.parameters.first_index) * size;
+                let bytes = memory
+                    .read_gpu(start, (u64::from(draw.parameters.count) * size) as usize)
+                    .unwrap_or_default();
+                let line = format!(
+                    "  index buffer at {start:#x}, {} indices of {size} bytes: {:02x?}",
+                    draw.parameters.count,
+                    &bytes[..bytes.len().min(64)]
+                );
+                if let Some(probe) = self.probe.as_mut() {
+                    probe.current = true;
+                    probe.note(line);
+                    probe.remember("index buffer".to_string(), start, bytes);
+                }
+            }
+            let description = format!(
+                "draw {} of submission {}: {} depth {:#x} fmt {:#x} enabled {} {}x{} test {} write {} func {} cull {} {:#x} front {:#x} y_control {:#x}",
+                number,
+                submission,
+                describe_draw(draw, &outcome),
+                draw.depth_target.address,
+                draw.depth_target.format,
+                draw.depth_target_enable,
+                draw.depth_target_size.width,
+                draw.depth_target_size.height,
+                draw.depth_test_enable,
+                draw.depth_write_enable,
+                draw.depth_test_func,
+                draw.cull_enable,
+                draw.cull_face,
+                draw.front_face,
+                draw.y_control,
+            );
+            if let Some(probe) = self.probe.as_mut() {
+                probe.finish_draw(description);
+            }
+        }
+        if produces {
+            let line = format!(
+                "  into a watched target: draw {} of submission {}: {} depth {:#x} enabled {} test {} write {}",
+                number,
+                submission,
+                describe_draw(draw, &outcome),
+                draw.depth_target.address,
+                draw.depth_target_enable,
+                draw.depth_test_enable,
+                draw.depth_write_enable,
+            );
+            if let Some(probe) = self.probe.as_mut() {
+                probe.line(line);
+            }
+        }
         Ok(())
+    }
+
+    /// Copy the `rect` (guest pixels) of the color or depth target at
+    /// `address` for `RECOMP_VULKAN_PROBE`, as raw texels.
+    fn probe_crop(&mut self, address: u64, when: &str, rect: [u32; 4]) -> Result<(), String> {
+        let found = match self.target_at.get(&address) {
+            Some(key) => self
+                .targets
+                .get(key)
+                .map(|image| (*image, formats::color_target_bytes(key.format), key.format)),
+            None => self.depth_at.get(&address).and_then(|key| {
+                self.depths
+                    .get(key)
+                    .map(|image| (*image, Some(4), key.format))
+            }),
+        };
+        let Some((image, Some(texel), format)) = found else {
+            return Ok(());
+        };
+        let depth = formats::aspects(image.format).contains(vk::ImageAspectFlags::DEPTH);
+        let [x, y, width, height] = rect.map(|value| scaled(value, image.scale));
+        let (x, y) = (x.min(image.width - 1), y.min(image.height - 1));
+        let (width, height) = (width.min(image.width - x), height.min(image.height - y));
+        let len = u64::from(width) * u64::from(height) * u64::from(texel);
+        if self.probe_crop_buffer.is_none() {
+            self.probe_crop_buffer = Some(host_buffer(
+                &self.device,
+                &self.memory_properties,
+                64 << 20,
+                vk::BufferUsageFlags::TRANSFER_DST,
+                vk::MemoryPropertyFlags::HOST_CACHED,
+            )?);
+        }
+        let Some(offset) = self
+            .probe_crop_buffer
+            .as_mut()
+            .and_then(|buffer| buffer.reserve(len, 16))
+        else {
+            return Ok(());
+        };
+        let copy = vk::BufferImageCopy {
+            buffer_offset: offset,
+            buffer_row_length: 0,
+            buffer_image_height: 0,
+            image_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: if depth {
+                    vk::ImageAspectFlags::DEPTH
+                } else {
+                    vk::ImageAspectFlags::COLOR
+                },
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            image_offset: vk::Offset3D {
+                x: x as i32,
+                y: y as i32,
+                z: 0,
+            },
+            image_extent: vk::Extent3D {
+                width,
+                height,
+                depth: 1,
+            },
+        };
+        let buffer = self.probe_crop_buffer.as_ref().expect("made above").buffer;
+        self.barrier();
+        unsafe {
+            self.device.cmd_copy_image_to_buffer(
+                self.command,
+                image.image,
+                vk::ImageLayout::GENERAL,
+                buffer,
+                std::slice::from_ref(&copy),
+            );
+        }
+        self.barrier();
+        self.probe_crops.push(ProbeCrop {
+            name: format!("{when}-{address:x}-{width}x{height}-{format:x}.bin"),
+            offset,
+            len,
+        });
+        Ok(())
+    }
+
+    /// A probed draw's vertex range: where it is, the hash of its guest
+    /// bytes, whether the copy the draw reads (vertex cache or stream) holds
+    /// the same bytes, and the bytes kept to see later writes.
+    fn probe_vertices(
+        &mut self,
+        memory: &dyn GpuMemory,
+        binding: u32,
+        start: u64,
+        len: u64,
+        stride: u64,
+        placed: (vk::Buffer, u64),
+    ) {
+        let guest = memory.read_gpu(start, len as usize).unwrap_or_default();
+        let copy = if placed.0 == self.stream.buffer {
+            Some(("stream", self.stream.read(placed.1, len).to_vec()))
+        } else {
+            self.vertex_cache
+                .as_ref()
+                .filter(|cache| cache.arena.buffer == placed.0)
+                .map(|cache| ("vertex cache", cache.arena.read(placed.1, len).to_vec()))
+        };
+        let (from, same) = match &copy {
+            Some((from, bytes)) => (*from, bytes == &guest),
+            None => ("elsewhere", false),
+        };
+        let line = format!(
+            "  vertex buffer {binding} at {start:#x} (cpu {:#x}), {len} bytes, stride {stride}: guest hash {:#x}, drawn from the {from}, same bytes {same}",
+            canonical(memory, start),
+            twox_hash::XxHash3_64::oneshot(&guest),
+        );
+        if let Some(probe) = self.probe.as_mut() {
+            probe.note(line);
+            probe.remember(format!("vertex buffer {binding}"), start, guest);
+        }
+    }
+
+    /// The crops copied since the last call (see `probe_crop`).
+    pub fn take_probe_crops(&mut self) -> Vec<ProbeCrop> {
+        std::mem::take(&mut self.probe_crops)
+    }
+
+    /// Write crops whose submissions have run to `dir`, and make room for
+    /// the next frame's.
+    pub fn write_probe_crops(&mut self, crops: Vec<ProbeCrop>, dir: &Path) {
+        let Some(buffer) = self.probe_crop_buffer.as_mut() else {
+            return;
+        };
+        let _ = std::fs::create_dir_all(dir);
+        for crop in &crops {
+            let _ = std::fs::write(dir.join(&crop.name), buffer.read(crop.offset, crop.len));
+        }
+        buffer.cursor = 0;
+    }
+
+    fn probing(&self) -> bool {
+        self.probe.as_ref().is_some_and(|probe| probe.current)
+    }
+
+    fn probe_note(&mut self, line: String) {
+        if let Some(probe) = self.probe.as_mut() {
+            probe.note(line);
+        }
+    }
+
+    /// Where the texture a probed draw samples came from (see
+    /// `texture_view`), with an identity for its image: whether two frames
+    /// sampled the same one, and the same bytes.
+    fn probe_texture(
+        &mut self,
+        memory: &dyn GpuMemory,
+        header: &TextureHeader,
+        kind: TextureKind,
+        view: vk::ImageView,
+    ) -> String {
+        let address = canonical(memory, header.address());
+        if let Some(probe) = self.probe.as_mut() {
+            probe.watch(address);
+        }
+        let image_line = |what: &str, key: &TargetKey, image: Option<&Image>| {
+            match image {
+            Some(image) => format!(
+                "{what} {:#x} {}x{} fmt {:#x} -> image {:?} {}x{} {:?} scale {} writes {} view {:?}",
+                key.address,
+                key.width,
+                key.height,
+                key.format,
+                image.image,
+                image.width,
+                image.height,
+                image.format,
+                image.scale,
+                self.writes.get(&image.image).copied().unwrap_or(0),
+                view,
+            ),
+            None => format!("{what} {key:?} without an image"),
+        }
+        };
+        if kind == TextureKind::D2 {
+            let depth_texture = formats::depth_texel_bytes(header.format()).is_some();
+            let color = self
+                .target_at
+                .get(&address)
+                .map(|key| image_line("target", key, self.targets.get(key)));
+            let depth = self
+                .depth_at
+                .get(&address)
+                .map(|key| image_line("depth", key, self.depths.get(key)));
+            let found = if depth_texture {
+                depth.or(color)
+            } else {
+                color.or(depth)
+            };
+            if let Some(found) = found {
+                return found;
+            }
+        }
+        let state = match self.textures.get(&header.words) {
+            Some(TextureState::Ready(image)) => format!("ready {:?}", image.image),
+            Some(TextureState::Preview(image, pending)) => {
+                format!(
+                    "preview {:?} (generation {})",
+                    image.image, pending.generation
+                )
+            }
+            Some(TextureState::Pending(pending)) => {
+                format!("pending (generation {})", pending.generation)
+            }
+            Some(TextureState::Unsupported) => "unsupported".to_string(),
+            None => "not cached".to_string(),
+        };
+        let hash = hash_gpu(memory, header.address(), 0x1_0000).unwrap_or(0);
+        format!("from memory: {state}, first 64 KiB hash {hash:#x}, view {view:?}")
     }
 
     fn record_draw(&mut self, memory: &dyn GpuMemory, draw: &DrawCall) -> Result<bool, String> {
@@ -3662,30 +4063,8 @@ impl Gpu {
             return Ok(false);
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
-            || is_subres_postprocess(draw)
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
-            if is_subres_postprocess(draw) {
-                // A skipped bloom level leaves the previous frame's glow in
-                // its target, and the final composite then alternates
-                // between that stale glow and a fresh frame: clear the
-                // targets the skipped draw would have written.
-                for target in draw
-                    .color_targets
-                    .iter()
-                    .filter(|target| is_bloom_target(*target))
-                {
-                    let clear = ClearColorCall {
-                        index: 0,
-                        layer: 0,
-                        layer_count: 1,
-                        component_mask: 0xF,
-                        color: [0.0; 4],
-                        target: *target,
-                    };
-                    self.clear(memory, &clear)?;
-                }
-            }
             return Ok(false);
         }
 
@@ -3919,7 +4298,28 @@ impl Gpu {
                 .min(VERTEX_BYTES);
             vertex_buffers[vertex_buffer_count] =
                 (*binding, self.vertex_range(memory, Some(start), wanted)?);
+            if self.probing() {
+                self.probe_vertices(
+                    memory,
+                    *binding,
+                    start,
+                    wanted,
+                    stride,
+                    vertex_buffers[vertex_buffer_count].1,
+                );
+            }
             vertex_buffer_count += 1;
+        }
+        if self.probing() {
+            let attributes: Vec<String> = attributes
+                .iter()
+                .map(|attribute| format!("{attribute:?}"))
+                .collect();
+            let line = format!(
+                "  vertex elements {first_element}..={last_element}, attributes (location, binding, format, offset) {}",
+                attributes.join(" ")
+            );
+            self.probe_note(line);
         }
         let vertex_buffers = &vertex_buffers[..vertex_buffer_count];
         self.phase(DrawPhase::Vertices, &mut clock);
@@ -4345,6 +4745,22 @@ impl Gpu {
                 let info = self
                     .stream
                     .push_uniform(memory, buffer, self.uniform_alignment)?;
+                if let Some(probe) = self.probe.as_mut().filter(|probe| probe.current) {
+                    let bound = draw
+                        .constant_buffer(*stage, slot as usize)
+                        .map(|binding| (binding.address, binding.size));
+                    let (lines, bytes) =
+                        crate::probe::constant_buffer(memory, *stage, slot, bound, extent);
+                    for line in lines {
+                        probe.note(line);
+                    }
+                    // The texture handle buffer is rewritten before every draw.
+                    if let Some((address, _)) =
+                        bound.filter(|_| slot as usize != draw.texture_buffer_index as usize)
+                    {
+                        probe.remember(format!("stage {stage} c{slot}"), address, bytes);
+                    }
+                }
                 if buffer_count < buffer_infos.len() {
                     buffer_infos[buffer_count] = (set, slot, info);
                     buffer_count += 1;
@@ -4469,6 +4885,38 @@ impl Gpu {
                 false,
             ),
         };
+        if self.probing() {
+            let described = match &header {
+                Some(header) => {
+                    let (base, last) = header.view_levels();
+                    format!(
+                        "{:#x} {}x{}x{} {:?} fmt {:#x} srgb {} swizzle {:?} levels {} view {base}-{last} layers {} words {:08x?}\n      {}",
+                        header.address(),
+                        header.width(),
+                        header.height(),
+                        header.depth(),
+                        header.target(),
+                        header.format(),
+                        header.srgb(),
+                        header.swizzle(),
+                        header.levels(),
+                        header.array_layers(),
+                        header.words,
+                        self.probe_texture(memory, header, binding.kind, view),
+                    )
+                }
+                None => "no header".to_string(),
+            };
+            self.probe_note(format!(
+                "  texture binding {} {:?}{} handle at {:#x}+{} = {handle:#x} (texture {texture_index:#x}, sampler {sampler_index:#x}, scaled {scaled}): {described}\n      sampler {:08x?}",
+                binding.binding,
+                binding.kind,
+                if binding.shadow { " shadow" } else { "" },
+                source.handles.unwrap_or(0),
+                binding.handle_offset,
+                sampler_header.words,
+            ));
+        }
         let filterable = !self.unfilterable.borrow().contains(&view);
         let sampler = self.sampler(&sampler_header, binding.shadow, filterable)?;
         Ok((view, sampler, scaled))
@@ -6201,29 +6649,6 @@ fn memory_type(
 /// image through one mapping and draw it through another.
 fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
     memory.resolve(address).unwrap_or(address)
-}
-
-/// LM3's lobby bloom downsample/blur chain: full-screen triangles at
-/// 960x540 and below, drawn without blending or a depth test. Their shader
-/// addresses move between runs, so the size identifies the chain. The gem's
-/// bloom spreads into a giant cyan orb around Hellen Gravely's necklace;
-/// skip the chain until its mask/scale is reproduced.
-/// The 960x540 and 480x270 scene-color passes that carry Hellen's color
-/// grading; they must keep running, or the final composite flickers.
-const LM3_LOBBY_COLOR_TARGETS: [u64; 2] = [0x5a95_10000, 0x5a9c_30000];
-
-fn is_bloom_target(target: &ColorTargetState) -> bool {
-    target.enabled()
-        && target.width_or_stride <= 960
-        && target.height <= 540
-        && !LM3_LOBBY_COLOR_TARGETS.contains(&target.address)
-}
-
-fn is_subres_postprocess(draw: &DrawCall) -> bool {
-    draw.parameters.count == 3
-        && !draw.depth_test_enable
-        && draw.blend_enables.iter().all(|enabled| !enabled)
-        && draw.color_targets.iter().any(is_bloom_target)
 }
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment

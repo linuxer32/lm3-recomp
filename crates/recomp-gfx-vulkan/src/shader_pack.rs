@@ -12,6 +12,13 @@
 //! offset table, and indexes each entry by its 50-byte key (hash, stage and
 //! type environment). A module's metadata and SPIR-V words are read and
 //! parsed only when the game first asks for that key.
+//!
+//! The hash covers a program's first 0x200 bytes only, and material
+//! variants in the library often share those (LM3's has 171 such keys over
+//! 500 entries): a key with more than one entry is ambiguous, and a lookup
+//! of it misses, so the program the game uses is translated live. Picking
+//! one of the variants ran another material's code: Hellen Gravely's
+//! pendant read leftover constant words as its colour and flickered yellow.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -38,7 +45,21 @@ struct Span {
 pub struct ShaderPack {
     file: File,
     path: PathBuf,
-    entries: HashMap<(u64, [u8; 41]), Span>,
+    /// Each key's entry; `None` when several entries share it.
+    entries: HashMap<(u64, [u8; 41]), Option<Span>>,
+}
+
+/// Index `span` under `key`, or mark the key ambiguous when another entry
+/// has it.
+fn add_entry(
+    entries: &mut HashMap<(u64, [u8; 41]), Option<Span>>,
+    key: (u64, [u8; 41]),
+    span: Span,
+) {
+    entries
+        .entry(key)
+        .and_modify(|entry| *entry = None)
+        .or_insert(Some(span));
 }
 
 impl ShaderPack {
@@ -88,7 +109,8 @@ impl ShaderPack {
                     .map_err(|error| format!("{}: {error}", path.display()))?;
                 let mut cursor = Cursor { bytes: &key, at: 0 };
                 let (hash, types, _) = cursor.key()?;
-                entries.insert(
+                add_entry(
+                    &mut entries,
                     (hash, types),
                     Span {
                         offset,
@@ -110,7 +132,8 @@ impl ShaderPack {
                 let offset = cursor.at as u64;
                 let (hash, types, stage) = cursor.key()?;
                 cursor.body(stage)?;
-                entries.insert(
+                add_entry(
+                    &mut entries,
                     (hash, types),
                     Span {
                         offset,
@@ -120,9 +143,10 @@ impl ShaderPack {
             }
         }
 
+        let ambiguous = entries.values().filter(|span| span.is_none()).count();
         println!(
-            "[recomp-vulkan] indexed {} shader pack entries from {} in {:.1} ms",
-            entries.len(),
+            "[recomp-vulkan] indexed {} shader pack entries ({ambiguous} keys shared by variants, translated live) from {} in {:.1} ms",
+            entries.len() - ambiguous,
             path.display(),
             started.elapsed().as_secs_f64() * 1000.0
         );
@@ -134,10 +158,11 @@ impl ShaderPack {
     }
 
     /// The translated program for `hash` and `types`, read from the pack on
-    /// first use. `Ok(None)` is a normal miss; `Err` means the pack could not
-    /// be read (the caller falls back to live translation).
+    /// first use. `Ok(None)` is a normal miss (or an ambiguous key); `Err`
+    /// means the pack could not be read (the caller falls back to live
+    /// translation).
     pub fn lookup(&self, hash: u64, types: &[u8; 41]) -> Result<Option<TranslatedShader>, String> {
-        let Some(span) = self.entries.get(&(hash, *types)).copied() else {
+        let Some(Some(span)) = self.entries.get(&(hash, *types)).copied() else {
             return Ok(None);
         };
         let len = usize::try_from(span.len).map_err(|_| "shader pack entry is too large")?;
@@ -304,7 +329,11 @@ mod tests {
         let started = std::time::Instant::now();
         let pack = ShaderPack::load(Path::new(&path)).expect("load shader pack");
         println!("shader pack load: {:?}", started.elapsed());
-        let &(hash, types) = pack.entries.keys().next().expect("indexed entries");
+        let (&(hash, types), _) = pack
+            .entries
+            .iter()
+            .find(|(_, span)| span.is_some())
+            .expect("indexed entries");
         let started = std::time::Instant::now();
         let shader = pack
             .lookup(hash, &types)
@@ -326,18 +355,16 @@ mod tests {
     fn verify_pack_entries() {
         let path = std::env::var_os("RECOMP_SHADER_PACK").expect("RECOMP_SHADER_PACK");
         let pack = ShaderPack::load(Path::new(&path)).expect("load shader pack");
-        let mut words = 0usize;
-        for &(hash, types) in pack.entries.keys() {
+        let (mut parsed, mut words) = (0usize, 0usize);
+        for (&(hash, types), _) in pack.entries.iter().filter(|(_, span)| span.is_some()) {
             let shader = pack
                 .lookup(hash, &types)
                 .expect("lookup")
                 .expect("indexed entry");
+            parsed += 1;
             words += shader.words.len();
         }
-        println!(
-            "parsed {} shader pack entries, {words} SPIR-V words",
-            pack.entries.len()
-        );
+        println!("parsed {parsed} shader pack entries, {words} SPIR-V words");
     }
 
     fn put_u32(out: &mut Vec<u8>, value: u32) {
@@ -419,18 +446,23 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_keys_keep_the_last_entry() {
+    fn duplicate_keys_miss() {
         let types = [0u8; 41];
-        let bytes = pack(
-            MAGIC_V2,
-            &[entry(0x1234, 5, types, &[1]), entry(0x1234, 1, types, &[2])],
-        );
-        let (path, pack) = load_pack("duplicate", &bytes);
-        assert_eq!(pack.entries.len(), 1);
-        let shader = pack.lookup(0x1234, &types).unwrap().unwrap();
-        assert_eq!(shader.stage, Stage::Vertex);
-        assert_eq!(shader.words, [2]);
-        std::fs::remove_file(path).unwrap();
+        for magic in [MAGIC_V1, MAGIC_V2] {
+            let bytes = pack(
+                magic,
+                &[
+                    entry(0x1234, 5, types, &[1]),
+                    entry(0x5678, 5, types, &[3]),
+                    entry(0x1234, 5, types, &[2]),
+                ],
+            );
+            let (path, pack) = load_pack("duplicate", &bytes);
+            // Two variants share 0x1234's prefix: neither is the program.
+            assert!(pack.lookup(0x1234, &types).unwrap().is_none());
+            assert_eq!(pack.lookup(0x5678, &types).unwrap().unwrap().words, [3]);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]
