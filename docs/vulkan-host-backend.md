@@ -438,6 +438,27 @@ report, so every query reads as visible.
   the one before (`frame <n> took <t> ms`): with `RECOMP_TRACE_FS=1`, which
   logs save data writes, a hitch while the title saves lines up with the
   writes around it.
+- `RECOMP_VULKAN_PROBE=<fragment program>[:<count>],...` logs chosen draws
+  over a few frames while the title runs (`probe.rs`), for glitches that
+  change from frame to frame and take a while to reach. It waits until the
+  file `probe.on` appears in `RECOMP_VULKAN_PROBE_DIR` (default `probe`),
+  then for `RECOMP_VULKAN_PROBE_FRAMES` frames (default 40) appends to
+  `probe.txt` each probed draw's state, the constant buffers its programs
+  read (words as hex and floats), its textures (header, and whether it
+  sampled a render target, a depth target or an image prepared from guest
+  memory), the draws, clears and copies into the targets it sampled, and the
+  constant words that changed after it read them; it saves its programs and
+  each frame. The file's words can pick the programs for the round,
+  `frames=<n>`, `capture=<address>` (save that target instead of the frame),
+  `target=<address>,...` (probe every draw into those color targets) and
+  `crop=<x>,<y>,<w>,<h>` with `snap=<address>,...` (raw texels of those
+  targets as the probed draw is about to run, and of its own target after
+  it, named `d<draw>-before/after-...` by the draw's number in `probe.txt`).
+  Comparing a flickering material's good and bad frames this way found the
+  dropped inline constant-buffer words (`maxwell-gpu-processor.md`) and the
+  shader pack handing the pendant gem another variant's program
+  (`windows-build.md`): the program it dumps reads more constant words than
+  the translation's extent covers.
 - `RECOMP_VULKAN_SKIP_FS=<address>,...` skips draws with those fragment
   programs: dropping groups of draws and comparing captures finds the draw
   behind a glitch.
