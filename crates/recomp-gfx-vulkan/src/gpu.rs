@@ -3663,6 +3663,7 @@ impl Gpu {
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
             || is_subres_postprocess(draw)
+            || is_lobby_glow_sprite(draw)
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             if is_subres_postprocess(draw) {
@@ -6224,6 +6225,23 @@ fn is_subres_postprocess(draw: &DrawCall) -> bool {
         && !draw.depth_test_enable
         && draw.blend_enables.iter().all(|enabled| !enabled)
         && draw.color_targets.iter().any(is_bloom_target)
+}
+
+/// The 4-vertex additive glow cards drawn over the pendant in the lobby.
+/// They z-fight the red gem and alternate the visible color with it; skip
+/// only these two programs, not the gem's own 12-vertex material.
+const LM3_LOBBY_GLOW_SPRITES: [u64; 2] = [0x4010_56030, 0x4003_5b030];
+
+fn is_lobby_glow_sprite(draw: &DrawCall) -> bool {
+    draw.parameters.count == 4
+        && draw.blend_enables.iter().any(|enabled| *enabled)
+        && draw
+            .color_targets
+            .iter()
+            .any(|target| target.enabled() && target.address == 0x5a4e_70000)
+        && draw
+            .fragment_shader()
+            .is_some_and(|address| LM3_LOBBY_GLOW_SPRITES.contains(&address))
 }
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
