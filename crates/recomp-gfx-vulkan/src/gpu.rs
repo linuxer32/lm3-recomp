@@ -3662,9 +3662,7 @@ impl Gpu {
             return Ok(false);
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
-            || draw
-                .fragment_shader()
-                .is_some_and(|address| LM3_LOBBY_BLOOM_PROGRAMS.contains(&address))
+            || is_subres_postprocess(draw)
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             return Ok(false);
@@ -6184,19 +6182,20 @@ fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
     memory.resolve(address).unwrap_or(address)
 }
 
-/// LM3's lobby bloom chain: the bright extract, the 960x540 to 64x33
-/// downsample and blur levels, and the composite. The gem's bloom spreads
-/// into a giant cyan orb around Hellen Gravely's necklace; skip the chain
-/// until its mask/scale is reproduced.
-const LM3_LOBBY_BLOOM_PROGRAMS: &[u64] = &[
-    0x40094f030, // bright extract
-    0x40004d030, // blur
-    0x400050030, // blur
-    0x400051030, // blur
-    0x400991030, // downsample levels
-    0x400995030, // composite
-    0x4018ac030, // composite
-];
+/// LM3's lobby bloom downsample/blur chain: full-screen triangles at
+/// 960x540 and below, drawn without blending or a depth test. Their shader
+/// addresses move between runs, so the size identifies the chain. The gem's
+/// bloom spreads into a giant cyan orb around Hellen Gravely's necklace;
+/// skip the chain until its mask/scale is reproduced.
+fn is_subres_postprocess(draw: &DrawCall) -> bool {
+    draw.parameters.count == 3
+        && !draw.depth_test_enable
+        && draw.blend_enables.iter().all(|enabled| !enabled)
+        && draw
+            .color_targets
+            .iter()
+            .any(|target| target.enabled() && target.width_or_stride <= 960 && target.height <= 540)
+}
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
 /// programs (to find which draw makes a glitch); 0 names depth-only draws.
