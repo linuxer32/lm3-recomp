@@ -6188,13 +6188,19 @@ fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
 /// bloom spreads into a giant cyan orb around Hellen Gravely's necklace;
 /// skip the chain until its mask/scale is reproduced.
 fn is_subres_postprocess(draw: &DrawCall) -> bool {
+    // Keep the 960x540 and 480x270 scene-color passes: they carry Hellen's
+    // color grading. Skipping them left the final composite sampling a stale
+    // target, so her color flickered between frames.
+    const COLOR_TARGETS: [u64; 2] = [0x5a95_10000, 0x5a9c_30000];
     draw.parameters.count == 3
         && !draw.depth_test_enable
         && draw.blend_enables.iter().all(|enabled| !enabled)
-        && draw
-            .color_targets
-            .iter()
-            .any(|target| target.enabled() && target.width_or_stride <= 960 && target.height <= 540)
+        && draw.color_targets.iter().any(|target| {
+            target.enabled()
+                && target.width_or_stride <= 960
+                && target.height <= 540
+                && !COLOR_TARGETS.contains(&target.address)
+        })
 }
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
