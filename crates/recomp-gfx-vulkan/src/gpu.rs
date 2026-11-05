@@ -3662,9 +3662,6 @@ impl Gpu {
             return Ok(false);
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
-            || draw
-                .fragment_shader()
-                .is_some_and(|address| LM3_LOBBY_EFFECT_PROGRAMS.contains(&address))
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             return Ok(false);
@@ -3706,9 +3703,6 @@ impl Gpu {
         let Some(fragment_key) = fragment_key else {
             return Ok(false);
         };
-        if matches!(fragment_key.2, LM3_GEM_GLOW | LM3_LIGHT_VOLUME) {
-            return Ok(false);
-        }
         self.phase(DrawPhase::Shaders, &mut clock);
         // Copied out so the shader map borrow ends before the draw's other
         // lookups, without allocating a vector per draw.
@@ -5212,26 +5206,6 @@ impl Gpu {
                 | (u64::from(draw.depth_write_enable) << 1)
                 | (u64::from(draw.depth_test_func) << 8),
         ]);
-        // Stencil is part of the pipeline too: a shader pair used with and
-        // without the test must not share one, or the first draw's test
-        // decides the other's. LM3's light volumes set a back-face test.
-        match draw.stencil {
-            Some((front, back)) => {
-                key.push(1);
-                for face in [front, back] {
-                    key.extend([
-                        u64::from(face.fail),
-                        u64::from(face.depth_fail),
-                        u64::from(face.pass),
-                        u64::from(face.func),
-                        u64::from(face.reference),
-                        u64::from(face.compare_mask),
-                        u64::from(face.write_mask),
-                    ]);
-                }
-            }
-            None => key.push(0),
-        }
         let mut cull = cull_mode(draw.cull_enable, draw.cull_face);
         let mut front = front_face(draw.front_face, draw.y_control);
         // Diagnostics for a title with an inverted face order or a culled
@@ -6206,32 +6180,6 @@ fn memory_type(
 fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
     memory.resolve(address).unwrap_or(address)
 }
-
-/// LM3's gem-glow full-screen pass (fragment program `0x400990030`). Its
-/// screen-space mask is not reproduced yet; in the lobby close-up it painted
-/// a giant cyan orb around Hellen Gravely's necklace, so the pass is skipped
-/// until the mask is understood.
-const LM3_GEM_GLOW: u64 = 0xd3011ae53981cfd4;
-
-/// LM3's 12 lobby light-volume draws (fragment program `0x4016cb030`). Their
-/// volume shader leaves an unbounded cyan orb around Hellen Gravely's
-/// necklace in the close-up; the lobby is still lit correctly without them.
-const LM3_LIGHT_VOLUME: u64 = 0x81431ba8f696334f;
-
-/// The lobby's light-volume, light-cone and glow-sprite fragment programs.
-/// Their screen-space masks are not reproduced yet and they paint a huge
-/// cyan orb around Hellen Gravely's necklace; the lobby is still lit without
-/// them.
-const LM3_LOBBY_EFFECT_PROGRAMS: &[u64] = &[
-    0x4016cb030, // light volumes
-    0x4016cc030, // light volumes
-    0x401318030, // light cones
-    0x401338030, // light cones
-    0x401327030, // light cones
-    0x401056030, // light glow sprites
-    0x40035b030, // light glow sprites
-    0x400990030, // gem-glow full-screen pass
-];
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
 /// programs (to find which draw makes a glitch); 0 names depth-only draws.
