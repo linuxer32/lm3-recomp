@@ -3662,6 +3662,9 @@ impl Gpu {
             return Ok(false);
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
+            || draw
+                .fragment_shader()
+                .is_some_and(|address| LM3_LOBBY_EFFECT_PROGRAMS.contains(&address))
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             return Ok(false);
@@ -6214,6 +6217,21 @@ const LM3_GEM_GLOW: u64 = 0xd3011ae53981cfd4;
 /// volume shader leaves an unbounded cyan orb around Hellen Gravely's
 /// necklace in the close-up; the lobby is still lit correctly without them.
 const LM3_LIGHT_VOLUME: u64 = 0x81431ba8f696334f;
+
+/// The lobby's light-volume, light-cone and glow-sprite fragment programs.
+/// Their screen-space masks are not reproduced yet and they paint a huge
+/// cyan orb around Hellen Gravely's necklace; the lobby is still lit without
+/// them.
+const LM3_LOBBY_EFFECT_PROGRAMS: &[u64] = &[
+    0x4016cb030, // light volumes
+    0x4016cc030, // light volumes
+    0x401318030, // light cones
+    0x401338030, // light cones
+    0x401327030, // light cones
+    0x401056030, // light glow sprites
+    0x40035b030, // light glow sprites
+    0x400990030, // gem-glow full-screen pass
+];
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
 /// programs (to find which draw makes a glitch); 0 names depth-only draws.
