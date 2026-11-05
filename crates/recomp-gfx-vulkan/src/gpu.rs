@@ -3665,6 +3665,27 @@ impl Gpu {
             || is_subres_postprocess(draw)
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
+            if is_subres_postprocess(draw) {
+                // A skipped bloom level leaves the previous frame's glow in
+                // its target, and the final composite then alternates
+                // between that stale glow and a fresh frame: clear the
+                // targets the skipped draw would have written.
+                for target in draw
+                    .color_targets
+                    .iter()
+                    .filter(|target| is_bloom_target(*target))
+                {
+                    let clear = ClearColorCall {
+                        index: 0,
+                        layer: 0,
+                        layer_count: 1,
+                        component_mask: 0xF,
+                        color: [0.0; 4],
+                        target: *target,
+                    };
+                    self.clear(memory, &clear)?;
+                }
+            }
             return Ok(false);
         }
 
@@ -6187,20 +6208,22 @@ fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
 /// addresses move between runs, so the size identifies the chain. The gem's
 /// bloom spreads into a giant cyan orb around Hellen Gravely's necklace;
 /// skip the chain until its mask/scale is reproduced.
+/// The 960x540 and 480x270 scene-color passes that carry Hellen's color
+/// grading; they must keep running, or the final composite flickers.
+const LM3_LOBBY_COLOR_TARGETS: [u64; 2] = [0x5a95_10000, 0x5a9c_30000];
+
+fn is_bloom_target(target: &ColorTargetState) -> bool {
+    target.enabled()
+        && target.width_or_stride <= 960
+        && target.height <= 540
+        && !LM3_LOBBY_COLOR_TARGETS.contains(&target.address)
+}
+
 fn is_subres_postprocess(draw: &DrawCall) -> bool {
-    // Keep the 960x540 and 480x270 scene-color passes: they carry Hellen's
-    // color grading. Skipping them left the final composite sampling a stale
-    // target, so her color flickered between frames.
-    const COLOR_TARGETS: [u64; 2] = [0x5a95_10000, 0x5a9c_30000];
     draw.parameters.count == 3
         && !draw.depth_test_enable
         && draw.blend_enables.iter().all(|enabled| !enabled)
-        && draw.color_targets.iter().any(|target| {
-            target.enabled()
-                && target.width_or_stride <= 960
-                && target.height <= 540
-                && !COLOR_TARGETS.contains(&target.address)
-        })
+        && draw.color_targets.iter().any(is_bloom_target)
 }
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
