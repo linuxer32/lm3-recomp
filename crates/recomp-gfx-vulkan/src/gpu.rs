@@ -3703,7 +3703,7 @@ impl Gpu {
         let Some(fragment_key) = fragment_key else {
             return Ok(false);
         };
-        if fragment_key.2 == LM3_GEM_GLOW {
+        if matches!(fragment_key.2, LM3_GEM_GLOW | LM3_LIGHT_VOLUME) {
             return Ok(false);
         }
         self.phase(DrawPhase::Shaders, &mut clock);
@@ -6209,6 +6209,11 @@ fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
 /// a giant cyan orb around Hellen Gravely's necklace, so the pass is skipped
 /// until the mask is understood.
 const LM3_GEM_GLOW: u64 = 0xd3011ae53981cfd4;
+
+/// LM3's 12 lobby light-volume draws (fragment program `0x4016cb030`). Their
+/// volume shader leaves an unbounded cyan orb around Hellen Gravely's
+/// necklace in the close-up; the lobby is still lit correctly without them.
+const LM3_LIGHT_VOLUME: u64 = 0x81431ba8f696334f;
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
 /// programs (to find which draw makes a glitch); 0 names depth-only draws.
