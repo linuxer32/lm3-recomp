@@ -168,6 +168,13 @@ index, and parses an entry on first use: startup is about 12 ms and 5 MB
 instead of 212-224 ms and ~320 MB. A 30-second title test logged one 1.3 ms
 fallback translation.
 
+The code hash covers a program's first 0x200 bytes, and material variants
+often share them: LM3's pack has 171 keys shared by 500 entries. Such a key
+is ambiguous, so its lookup misses and the program the game uses is
+translated live (the loader logs the count). Taking one of the variants ran
+another material's code. Hellen Gravely's pendant in the lobby read leftover
+constant words as its colour and flickered between red and yellow.
+
 The driver pipeline cache remains GPU/driver specific. `pipeline-cache.bin`
 is loaded at startup, saved every 64 new pipelines, and saved again by the
 renderer destructor on a normal window close. The local LLPC 26.10.1 cache
