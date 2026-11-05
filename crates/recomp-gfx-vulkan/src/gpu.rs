@@ -3662,6 +3662,9 @@ impl Gpu {
             return Ok(false);
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
+            || draw
+                .fragment_shader()
+                .is_some_and(|address| LM3_LOBBY_BLOOM_PROGRAMS.contains(&address))
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             return Ok(false);
@@ -6180,6 +6183,20 @@ fn memory_type(
 fn canonical(memory: &dyn GpuMemory, address: u64) -> u64 {
     memory.resolve(address).unwrap_or(address)
 }
+
+/// LM3's lobby bloom chain: the bright extract, the 960x540 to 64x33
+/// downsample and blur levels, and the composite. The gem's bloom spreads
+/// into a giant cyan orb around Hellen Gravely's necklace; skip the chain
+/// until its mask/scale is reproduced.
+const LM3_LOBBY_BLOOM_PROGRAMS: &[u64] = &[
+    0x40094f030, // bright extract
+    0x40004d030, // blur
+    0x400050030, // blur
+    0x400051030, // blur
+    0x400991030, // downsample levels
+    0x400995030, // composite
+    0x4018ac030, // composite
+];
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
 /// programs (to find which draw makes a glitch); 0 names depth-only draws.
