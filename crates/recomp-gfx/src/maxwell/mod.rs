@@ -707,7 +707,18 @@ impl<R: Renderer> MacroState for MacroBus<'_, R> {
             m::VB_ELEMENT_U32 => self.push_inline_indices(value, 1),
             m::CLEAR => self.clear(value),
             m::SEMAPHORE_CONTROL => self.report(value),
-            m::UNIFORM_BUFFER_UPDATE_DATA => self.constant_buffer_update(value),
+            // A word to any of the 16 data registers lands at the update
+            // offset: NVN's incrementing updates walk CB_DATA0, 1, 2...
+            // Taking only the first left the rest of each update unwritten,
+            // and draws read what an earlier draw left there (LM3's lobby
+            // pendant glint card read leftover words as its color).
+            offset
+                if (m::UNIFORM_BUFFER_UPDATE_DATA
+                    ..m::UNIFORM_BUFFER_UPDATE_DATA + 4 * m::UNIFORM_BUFFER_UPDATE_DATA_WORDS)
+                    .contains(&offset) =>
+            {
+                self.constant_buffer_update(value)
+            }
             m::UNIFORM_BUFFER_BIND_VERTEX
             | m::UNIFORM_BUFFER_BIND_TESS_CONTROL
             | m::UNIFORM_BUFFER_BIND_TESS_EVALUATION
@@ -1366,6 +1377,34 @@ mod tests {
         );
         assert_eq!(processor.state.uniform_buffer().offset, 8);
         assert_eq!(processor.stats.inline_copy_words, 2);
+    }
+
+    #[test]
+    fn inline_constant_buffer_data_fills_every_data_register() {
+        let mut processor = CommandProcessor::new(DrawRecorder::default());
+        let mut memory = TestMemory::new(0x1000);
+
+        processor.state.write(m::UNIFORM_BUFFER_STATE, 0x100);
+        processor.state.write(m::UNIFORM_BUFFER_STATE + 8, 0x800);
+        processor.state.write(m::UNIFORM_BUFFER_STATE + 0x0c, 0x10);
+
+        let mut list = bound_3d();
+        // Increasing: the words go to CB_DATA0, CB_DATA1 and CB_DATA2, and
+        // all three land one after another at the update offset.
+        list.extend([
+            header(word(m::UNIFORM_BUFFER_UPDATE_DATA), 0, 3, 1),
+            0xaa,
+            0xbb,
+            0xcc,
+        ]);
+        processor.submit_list(&mut memory, &list);
+
+        assert_eq!(
+            memory.read_gpu(0x810, 12),
+            Some(vec![0xaa, 0, 0, 0, 0xbb, 0, 0, 0, 0xcc, 0, 0, 0])
+        );
+        assert_eq!(processor.state.uniform_buffer().offset, 0x1c);
+        assert_eq!(processor.stats.inline_copy_words, 3);
     }
 
     #[test]

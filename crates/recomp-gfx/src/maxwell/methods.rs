@@ -200,6 +200,9 @@ pub const SET_FALCON30: usize = 0x2378;
 pub const SET_FALCON31: usize = 0x237c;
 pub const UNIFORM_BUFFER_STATE: usize = 0x2380;
 pub const UNIFORM_BUFFER_UPDATE_DATA: usize = 0x2390;
+/// The inline update data registers (CB_DATA0..15) from
+/// `UNIFORM_BUFFER_UPDATE_DATA` on.
+pub const UNIFORM_BUFFER_UPDATE_DATA_WORDS: usize = 16;
 pub const UNIFORM_BUFFER_BIND_VERTEX: usize = 0x2410;
 pub const UNIFORM_BUFFER_BIND_TESS_CONTROL: usize = 0x2430;
 pub const UNIFORM_BUFFER_BIND_TESS_EVALUATION: usize = 0x2450;
