@@ -1672,7 +1672,7 @@ impl Gpu {
         let mut image_infos = Vec::new();
         let mut scaled_textures = 0u32;
         for binding in textures {
-            let (view, sampler, scaled) = self.texture(memory, &source, &binding, None)?;
+            let (view, sampler, scaled) = self.texture(memory, &source, &binding)?;
             let bit = binding.binding - TEXTURE_BINDING_BASE;
             if scaled && bit < 32 {
                 scaled_textures |= 1 << bit;
@@ -3663,7 +3663,6 @@ impl Gpu {
         };
         if skipped_programs().contains(&draw.fragment_shader().unwrap_or(0))
             || is_subres_postprocess(draw)
-            || is_lobby_glow_sprite(draw)
             || (!skipped_kinds().is_empty() && draw_kinds(draw).iter().any(|kind| skips(kind)))
         {
             if is_subres_postprocess(draw) {
@@ -4367,20 +4366,7 @@ impl Gpu {
                 samplers_from_texture_index: draw.samplers_from_texture_index,
             };
             for binding in textures[..texture_count].iter().flatten() {
-                // The pendant gem samples a light map the game swaps between
-                // adjacent 256x256 textures; pin it to the red map so the
-                // necklace does not alternate red/cyan from frame to frame.
-                let forced =
-                    if draw.fragment_shader() == Some(0x4000c4030) && draw.parameters.count == 12 {
-                        match binding.handle_offset {
-                            40 => Some(0x1fa0_114a),
-                            48 => Some(0x1f90_1488),
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    };
-                let (view, sampler, scaled) = self.texture(memory, &source, binding, forced)?;
+                let (view, sampler, scaled) = self.texture(memory, &source, binding)?;
                 let bit = binding.binding - TEXTURE_BINDING_BASE;
                 if scaled && bit < 32 {
                     scaled_textures[*set_index as usize] |= 1 << bit;
@@ -4431,14 +4417,11 @@ impl Gpu {
         memory: &dyn GpuMemory,
         source: &TextureSource,
         binding: &TextureBinding,
-        forced_handle: Option<u32>,
     ) -> Result<(vk::ImageView, vk::Sampler, bool), String> {
-        let handle = forced_handle.unwrap_or_else(|| {
-            source
-                .handles
-                .and_then(|address| memory.read_u32(address + u64::from(binding.handle_offset)))
-                .unwrap_or(0)
-        });
+        let handle = source
+            .handles
+            .and_then(|address| memory.read_u32(address + u64::from(binding.handle_offset)))
+            .unwrap_or(0);
         let texture_index = handle & 0xF_FFFF;
         let sampler_index = if source.samplers_from_texture_index {
             texture_index
@@ -6241,23 +6224,6 @@ fn is_subres_postprocess(draw: &DrawCall) -> bool {
         && !draw.depth_test_enable
         && draw.blend_enables.iter().all(|enabled| !enabled)
         && draw.color_targets.iter().any(is_bloom_target)
-}
-
-/// The 4-vertex additive glow cards drawn over the pendant in the lobby.
-/// They z-fight the red gem and alternate the visible color with it; skip
-/// only these two programs, not the gem's own 12-vertex material.
-const LM3_LOBBY_GLOW_SPRITES: [u64; 2] = [0x4010_56030, 0x4003_5b030];
-
-fn is_lobby_glow_sprite(draw: &DrawCall) -> bool {
-    draw.parameters.count == 4
-        && draw.blend_enables.iter().any(|enabled| *enabled)
-        && draw
-            .color_targets
-            .iter()
-            .any(|target| target.enabled() && target.address == 0x5a4e_70000)
-        && draw
-            .fragment_shader()
-            .is_some_and(|address| LM3_LOBBY_GLOW_SPRITES.contains(&address))
 }
 
 /// `RECOMP_VULKAN_SKIP_FS=<address>,...`: skip draws with these fragment
