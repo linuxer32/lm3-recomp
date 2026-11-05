@@ -1672,7 +1672,7 @@ impl Gpu {
         let mut image_infos = Vec::new();
         let mut scaled_textures = 0u32;
         for binding in textures {
-            let (view, sampler, scaled) = self.texture(memory, &source, &binding, None)?;
+            let (view, sampler, scaled) = self.texture(memory, &source, &binding)?;
             let bit = binding.binding - TEXTURE_BINDING_BASE;
             if scaled && bit < 32 {
                 scaled_textures |= 1 << bit;
@@ -4366,14 +4366,7 @@ impl Gpu {
                 samplers_from_texture_index: draw.samplers_from_texture_index,
             };
             for binding in textures[..texture_count].iter().flatten() {
-                // The pendant gem samples a light map the game swaps between
-                // adjacent 256x256 textures; pin it to the red map so the
-                // necklace does not alternate red/cyan from frame to frame.
-                let forced = (draw.fragment_shader() == Some(0x4000c4030)
-                    && draw.parameters.count == 12
-                    && binding.handle_offset == 40)
-                    .then_some(0x1fa0_114a);
-                let (view, sampler, scaled) = self.texture(memory, &source, binding, forced)?;
+                let (view, sampler, scaled) = self.texture(memory, &source, binding)?;
                 let bit = binding.binding - TEXTURE_BINDING_BASE;
                 if scaled && bit < 32 {
                     scaled_textures[*set_index as usize] |= 1 << bit;
@@ -4424,14 +4417,11 @@ impl Gpu {
         memory: &dyn GpuMemory,
         source: &TextureSource,
         binding: &TextureBinding,
-        forced_handle: Option<u32>,
     ) -> Result<(vk::ImageView, vk::Sampler, bool), String> {
-        let handle = forced_handle.unwrap_or_else(|| {
-            source
-                .handles
-                .and_then(|address| memory.read_u32(address + u64::from(binding.handle_offset)))
-                .unwrap_or(0)
-        });
+        let handle = source
+            .handles
+            .and_then(|address| memory.read_u32(address + u64::from(binding.handle_offset)))
+            .unwrap_or(0);
         let texture_index = handle & 0xF_FFFF;
         let sampler_index = if source.samplers_from_texture_index {
             texture_index
